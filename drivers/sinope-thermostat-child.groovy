@@ -62,7 +62,7 @@ metadata {
 		attribute "outputPercentDisplay", "number"
         command "tempUp"
         command "tempDown"
-        command "test"
+        //command "test"
 	}
     
     preferences {
@@ -126,18 +126,73 @@ def refreshInfo()
 
 def tempUp() {
     log.debug("tempUp()")
-    def step = 0.5 
+    
+    def newSetpoint = device.currentValue("heatingSetpoint")
+    if (newSetpoint != null){
+        switch (location?.getTemperatureScale()) {
+            case "C":
+            newSetpoint = FormatTemp(device.currentValue("heatingSetpoint") + 0.5, false)
+            if (newSetpoint <= 5) {
+                newSetpoint = 5
+            }      
+            break;
+
+            default:
+            newSetpoint = FormatTemp(device.currentValue("heatingSetpoint") + 1, false)
+            if (newSetpoint <= 41) {
+                newSetpoint = 41
+            }  
+            break;
+        }
+    }
+    
+    unschedule(setTemperature)
+    runIn(2, setTemperature, [data:[newSetpoint, device.deviceNetworkId]])
+    /*def step = 0.5 
     def targetTemp = device.currentValue("thermostatSetpoint")
     def value = targetTemp + step
-  	parent.childSetTemp(value, device.deviceNetworkId)
+  	parent.childSetTemp(value, device.deviceNetworkId)*/
 }
 
 def tempDown() {
     log_debug("tempDown()")
-    def step = 0.5
+    
+    def newSetpoint = device.currentValue("heatingSetpoint")
+    if (newSetpoint != null){
+        switch (location?.getTemperatureScale()) {
+            case "C":
+            newSetpoint = FormatTemp(device.currentValue("heatingSetpoint") - 0.5, false)
+            if (newSetpoint <= 5) {
+                newSetpoint = 5
+            }      
+            break;
+
+            default:
+            newSetpoint = FormatTemp(device.currentValue("heatingSetpoint") - 1, false)
+            if (newSetpoint <= 41) {
+                newSetpoint = 41
+            }  
+            break;
+        }
+    }
+    
+    unschedule(setTemperature)
+    runIn(2, setTemperature, [data:[newSetpoint, device.deviceNetworkId]])
+    //parent.childSetTemp(newSetpoint, device.deviceNetworkId)
+    
+    /*def step = 0.5
     def targetTemp = device.currentValue("thermostatSetpoint")
     def value = targetTemp - step
-  	parent.childSetTemp(value, device.deviceNetworkId)
+  	parent.childSetTemp(value, device.deviceNetworkId)*/
+}
+
+def setTemperature(newSetPoint, id)
+{
+    log_debug("setTemperature newSetPoint: ${newSetPoint} - id: ${id}")
+    sendEvent(name: "thermostatSetpoint", value: newSetPoint, unit: location?.getTemperatureScale())
+    sendEvent(name: "heatingSetpoint", value: newSetPoint, unit: location?.getTemperatureScale())
+    sendEvent(name: "coolingSetpoint", value: newSetPoint, unit: location?.getTemperatureScale())
+    parent.childSetTemp(newSetPoint, id)
 }
 
 def test(){    
@@ -156,14 +211,17 @@ def poll() {
     }
 }
 
-def setHeatingSetpoint(temperature) {
-    log_debug("setHeatingSetpoint()")
-	parent.childSetTemp(temperature, device.deviceNetworkId)
+def setHeatingSetpoint(newSetpoint) {
+    log_debug("setHeatingSetpoint() newSetpoint: ${newSetpoint}")
+    unschedule(setTemperature)
+    runIn(2, setTemperature, [data:[newSetpoint, device.deviceNetworkId]])
 }
 
-def setThermostatSetpoint(temperature) {
-    log_debug("setThermostatSetpoint()")
-	parent.childSetTemp(temperature, device.deviceNetworkId)
+def setThermostatSetpoint(newSetpoint) {
+    log_debug("setThermostatSetpoint() temperature: ${newSetpoint}")
+    sendEvent(name: "heatingSetpoint", value: newSetpoint, unit: location?.getTemperatureScale())
+    unschedule(setTemperature)
+    runIn(2, setTemperature, [data:[newSetpoint, device.deviceNetworkId]])
 }
 
 def getTemperatureScale() {
@@ -227,17 +285,17 @@ def processChildResponse(response)
     log_debug("received processChildResponse response: ${response} unit: ${location?.getTemperatureScale()}")
     switch(response.type) {
         case "temperature":
-            def temp = roundToHalf(response.value)
+            def temp = FormatTemp(response.value, false)
             sendEvent(name: "temperature", value: temp, unit: location?.getTemperatureScale())
-            sendEvent(name:"thermostatMode", value: "heat")
+            //sendEvent(name:"thermostatMode", value: "heat")
             log_debug("received processChildResponse temperature: ${temp}")        
             break
         case "set_point":
-            def temp = roundToHalf(response.value)
+            def temp = FormatTemp(response.value, false)
             sendEvent(name: "thermostatSetpoint", value: temp, unit: location?.getTemperatureScale())
             sendEvent(name: "heatingSetpoint", value: temp, unit: location?.getTemperatureScale())
             sendEvent(name: "coolingSetpoint", value: temp, unit: location?.getTemperatureScale())
-            sendEvent(name:"thermostatMode", value: "heat")
+            //sendEvent(name:"thermostatMode", value: "heat")
             log_debug("received processChildResponse setPoint: ${temp}")
             break
         case "heat_level":
@@ -255,12 +313,12 @@ def processChildResponse(response)
             log_debug("received processChildResponse away: ${response.value}")
             break
         case "max_temp":
-            def temp = roundToHalf(response.value)
+            def temp = FormatTemp(response.value, false)
             sendEvent(name: "maximumTemperature", value: temp)
             log_debug("received processChildResponse tempmax: ${temp}")
             break
         case "min_temp":
-            def temp = roundToHalf(response.value)
+            def temp = FormatTemp(response.value, false)
             sendEvent(name: "minimumTemperature", value: temp)
             log_debug("received processChildResponse tempmin: ${temp}")
             break        
@@ -280,10 +338,6 @@ def processChildResponse(response)
             log_error("processChildResponse - Command not found!")
             break
     }
-}
-
-def float roundToHalf(float x) {
-    return (float) (Math.ceil(x * 2) / 2);
 }
 
 def set_outside_temperature(self, outside_temperature){
@@ -372,38 +426,24 @@ private minsToHoursMins(Integer intMins) {
     return hoursMins
 }
 
-def to_celcius(temp,unit){ //unit = K for kelvin, C for celcius, F for farenheight
-    if (unit == "C"){
-        return round((temp-32)*0.5555, 2)
-    }else{
-        return round((temp-273.15),2)
-    }
-}
-
-def from_celcius(temp){
-    return round((temp+1.8)+32, 2)
-}
-
-def FormatTemp(temp,invert){
-	if (temp!=null){
+def FormatTemp(temp, invert){
+	if (temp != null){
 		if(invert){
-			float i=Float.parseFloat(temp+"")
+			float i = Float.parseFloat(temp+"")
 			switch (location?.getTemperatureScale()) {
 				case "C":
-					return i.round(2)
+					return roundToHalf(i)
 				break;
 
 				case "F":
-					return (Math.round(fToC(i))).toDouble().round(2)
+					return roundToHalf((Math.round(fToC(i))).toDouble())
 				break;
 			}
-
-		}else{
-
-			float i=Float.parseFloat(temp+"")
+		} else {
+			float i = Float.parseFloat(temp+"")
 			switch (location?.getTemperatureScale()) {
 				case "C":
-					return i.round(2)
+					return roundToHalf(i)
 				break;
 
 				case "F":
@@ -411,17 +451,23 @@ def FormatTemp(temp,invert){
 				break;
 			}
 		}
-    }else{
+    } else {
     	return null
     }
 }
 
+def float roundToHalf(float x) {
+    return (float) (Math.ceil(x * 2) / 2);
+}
+
 def cToF(temp) {
 	return ((( 9 * temp ) / 5 ) + 32)
+	log.info "celsius -> fahrenheit"
 }
 
 def fToC(temp) {
 	return ((( temp - 32 ) * 5 ) / 9)
+	log.info "fahrenheit -> celsius"
 }
 
 def log_debug(logData)
