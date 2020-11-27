@@ -112,28 +112,11 @@ import java.util.concurrent.ConcurrentLinkedQueue
 
 @Field static java.util.concurrent.ConcurrentLinkedQueue commandQueue = new java.util.concurrent.ConcurrentLinkedQueue()
 @Field static java.util.concurrent.Semaphore mutex = new java.util.concurrent.Semaphore(1)
+@Field static String socketState = ""
+@Field static long lastLockQuery = 0
+@Field static long lockTime = 0
 @Field static int queueSize = 0
-
-/*Map getINTESIS_MAP() {
-	String map = """
-	{
-	"1": {"name": "power", "values": {"0": "off", "1": "on"}},
-	"2": {"name": "mode", "values": {"0": "auto", "1": "heat", "2": "dry", "3": "fan", "4": "cool"}},
-	"4": {"name": "fan_speed", "values": {"0": "auto", "1": "quiet", "2": "low", "3": "medium", "4": "high"}},
-	"5": {"name": "vvane", "values": {"0": "auto/stop", "10": "swing", "1": "manual1", "2": "manual2", "3": "manual3", "4": "manual4", "5": "manual5"}},
-	"6": {"name": "hvane", "values": {"0": "auto/stop", "10": "swing", "1": "manual1", "2": "manual2", "3": "manual3", "4": "manual4", "5": "manual5"}},
-	"9": {"name": "setpoint", "null": 32768},
-	"10": {"name": "temperature"},
-	"35": {"name": "setpoint_min"},
-	"36": {"name": "setpoint_max"},
-	"37": {"name": "outdoor_temperature"},
-	"68": {"name": "current_power_consumption"},
-	"69": {"name": "total_power_consumption"},
-	"70": {"name": "weekly_power_consumption"}
-	}
-	"""
-	return new JsonSlurper().parseText(map)
-}*/
+@Field static int socketErrors = 0
 
 metadata {
     definition(name: "Sinope Neviweb Hub", namespace: "rferrazguimaraes", author: "Rangner Ferraz Guimaraes") {
@@ -169,6 +152,11 @@ def refresh() {
     }
 }
 
+def initialize() {
+    log_debug("initialize()")
+    configure()
+}
+
 def installed() {
     log_debug("installed()")
     configure()
@@ -179,7 +167,12 @@ def uninstalled() {
     removeAllThermostats()
 }
 
-def configure(){    
+def updated() {
+    log_debug("updated()")
+    configure()    
+}
+
+def configure() {    
     log_warn("configure...")
     resetPoolCommand()
     unschedule()
@@ -245,7 +238,7 @@ def childSetTemp(float temperature, String dni) {
     sendRequest(dni, data_write_request(data_write_command, deviceID, data_setpoint, set_temperature(temperature)))
 }
 
-def get_climate_device_data(self, dni){
+def get_climate_device_data(self, dni) {
     log_debug("get_climate_device_data")
      // Get device data
      // send requests
@@ -276,7 +269,7 @@ def get_climate_device_info(self, device_id) {
     //return self.device_info
 }
 
-def get_power_load(data){ // get power in watt use by the device
+def get_power_load(data) { // get power in watt use by the device
     def sequence = data[12..19]
     def deviceID = data[26..33]
     def status = data[20..21]
@@ -292,7 +285,7 @@ def get_power_load(data){ // get power in watt use by the device
     }
 }
 
-def get_temperature(data){
+def get_temperature(data) {
     log_debug("get_temperature data: ${data}")
     def sequence = data[12..19]
     log_debug("get_temperature sequence: ${sequence}")
@@ -300,29 +293,29 @@ def get_temperature(data){
     log_debug("get_temperature deviceID: ${deviceID}")
     def status = data[20..21]
     log_debug("get_temperature status: ${status}")
-    if (status != "0A"){
+    if (status != "0A") {
         log_debug("Status code: ${status} (device didn't answer, wrong device ${deviceID}), Data:(${data})", status, deviceID, data)
         return None // device didn't answer, wrong device
     } else {
         def tc2 = data[46..47]
         def tc4 = data[48..49]
         def latemp = tc4+tc2
-        if (latemp == "7FFC" || latemp == "7FFA"){
+        if (latemp == "7FFC" || latemp == "7FFA") {
             log_debug("Error code: ${latemp} (None or invalid value for ${deviceID}), Data:(${data})", latemp, deviceID, data)
             return 0
-        } else if (latemp == "7ff8" || latemp == "7FFF"){
+        } else if (latemp == "7ff8" || latemp == "7FFF") {
             log_debug("Error code: ${latemp} (Temperature higher than maximum range for ${deviceID})", latemp, deviceID)
             return 0
-        } else if (latemp == "7FF9" || latemp == "8000" || latemp == "8001"){
+        } else if (latemp == "7FF9" || latemp == "8000" || latemp == "8001") {
             log_debug("Error code: ${latemp} (Temperature lower than minimum range for ${deviceID})", latemp, deviceID)
             return 0
-        } else if (latemp == "7FF6" || latemp == "7FF7" || latemp == "7FFd" || latemp == "7FFE"){
+        } else if (latemp == "7FF6" || latemp == "7FF7" || latemp == "7FFd" || latemp == "7FFE") {
             log_debug("Error code: ${latemp} (Defective device temperature sensor for ${deviceID}), Data:(${data})", latemp, deviceID, data)
             return 0
-        } else if (latemp == "7FFb"){
+        } else if (latemp == "7FFb") {
             log_debug("Error code: ${latemp} (Overload for ${deviceID})", latemp, deviceID)
             return 0
-        } else if (latemp == "7FF5"){
+        } else if (latemp == "7FF5") {
             log_debug("Error code: ${latemp} (Internal error for ${deviceID}), Data:(${data})", latemp, deviceID, data)
             return 0
         } else {
@@ -354,7 +347,7 @@ def put_mode(mode) { //0=off,1=freeze protect,2=manual,3=auto,5=away
     return "01"+byteArrayToHexString(packInt(mode)[0..0] as byte[])
 }
  
-def get_mode(data){
+def get_mode(data) {
     def sequence = data[12..19]
     def deviceID = data[26..33]
     def status = data[20..21]
@@ -376,7 +369,7 @@ def get_dst(timeZone) { // daylight saving time is on or not
     return 0
 }
 
-def set_all_away(self, away){
+def set_all_away(self, away) {
     //Set all devices to away mode 0=home, 2=away
     try {
         send_request(self, data_report_request(data_report_command, all_unit, data_away, set_away(away)))
@@ -503,7 +496,7 @@ def get_heat_level(data) {
     }
 }
 
-def set_temperature(temp_celcius){
+def set_temperature(temp_celcius) {
     def temp = temp_celcius*100 as Integer
     //log_debug("set_temperature - temp is ${temp}")
     //log_debug("set_temperature - packint is ${packInt(temp)[0..1]}")
@@ -520,7 +513,7 @@ def send_time(self, device_id) {
     }
 }
  
-def set_mode(self, device_id, device_type, mode){
+def set_mode(self, device_id, device_type, mode) {
     // Set device operation mode
     // prepare data
     try{
@@ -534,7 +527,7 @@ def set_mode(self, device_id, device_type, mode){
     }
 }
 
-def set_away_mode(self, device_id, away){
+def set_away_mode(self, device_id, away) {
     // Set device away mode. We need to send time before sending new away mode
     try{
         if (device_id == "all") {
@@ -550,7 +543,7 @@ def set_away_mode(self, device_id, away){
     } 
 }
 
-def get_result(data){ // check if data write was successfull, return True or False
+def get_result(data) { // check if data write was successfull, return True or False
     def sequence = data[12..19]
     def deviceID = data[26..33]
     def tc2 = data[20..21]
@@ -609,19 +602,17 @@ def processResponse(response)
 
     if (typeName == "getAPIKey")
     {
-        log_debug("received getAPIKey command sinopehubapikey before: ${device.getDataValue("ApiKey")}")
-        def sinopehubapikey = retreive_key(response)[0..15]
-        log_debug("sinopehubapikey after: ${sinopehubapikey}")
-        sendEventPublish(name: "sinopehubapikey", value: sinopehubapikey, displayed: true)
+        log_debug("received getAPIKey command state.APIKey before: ${state.APIKey}")
+        state.APIKey = retreive_key(response)[0..15]
+        log_debug("state.APIKey after: ${state.APIKey}")
         if (sinopehubapikey == "0000000000000000") // isso está errado 0..15 da menos que esse valor
         {
             log.info("API Key request failed. Check your Neviweb Hub ID")
-            device.updateDataValue("ApiKey", "")
+            state.APIKey = null
         }
         else
         {
-            device.updateDataValue("ApiKey", sinopehubapikey)
-            log.info("API Key saved: ${sinopehubapikey}")
+            log.info("API Key saved: ${state.APIKey}")
         }
     }
     else if (typeName == "addThermostat")
@@ -657,7 +648,7 @@ def processResponse(response)
     }        
     else if (typeName == "dataWrite2Response")
     {
-        dataWrite2Response(response)
+        updateChild("write", response)
     }
     else if (typeName == "dataRead1Response")
     {
@@ -665,7 +656,7 @@ def processResponse(response)
     }        
     else if (typeName == "dataRead2Response")
     {
-        updateChild(response)
+        updateChild("read", response)
     }
     else if (typeName == "dataReport1Response")
     {
@@ -697,7 +688,7 @@ def processResponse(response)
     }
 }
 
-def get_data_push(data){ //will be used to send data pushed by GT125 when light is turned on or off directly to HA device
+def get_data_push(data) { //will be used to send data pushed by GT125 when light is turned on or off directly to HA device
     def deviceID = data[26..33]
     def status = data[20..21]
     def tc2 = data[46..47]
@@ -711,7 +702,7 @@ def sendRequestResponse(response) {
     log_debug("status is ${status}")
     if (status == "55000C001101FF")
     {
-        log_debug("Login fail, please check your Api_Key")
+        log_debug("Login fail, please check your APIKey")
     }
     else // 55000C00110100 - Login ok
     {
@@ -735,9 +726,9 @@ def analyseDataResponse(response) {
             log_debug("status: ${status}")
             def more = response[24..25] //check if we will receive other data
             log_debug("more: ${more}")
-            if (status == "00"){ // request status = ok for read and write, we go on (read=00, report=01, write=00)
+            if (status == "00") { // request status = ok for read and write, we go on (read=00, report=01, write=00)
                 log_debug("request status = ok for read and write")
-                if (more == "01"){ //GT125 is sending another data response
+                if (more == "01") { //GT125 is sending another data response
                     log_debug("analyseDataResponse - GT125 is sending another data response")
                     if(typeName == "dataRead1Response")
                     {
@@ -760,7 +751,7 @@ def analyseDataResponse(response) {
                 log_debug("status ok for data report")
                 if(typeName == "dataRead1Response")
                 {
-                    updateChild(response)
+                    updateChild("read", response)
                 }
                 else if(typeName == "dataReport1Response")
                 {
@@ -768,7 +759,7 @@ def analyseDataResponse(response) {
                 }
                 else
                 {
-                    dataWrite2Response(response)
+                    updateChild("write", response)
                 }
                 //closeSocket()
                 //return response
@@ -786,13 +777,13 @@ def analyseDataResponse(response) {
             log_debug("datarec: ${datarec}")
             //def state = binascii.hexlify(datarec)[20..21]
             def state = datarec[20..21]
-            if (state == "00"){ // request has been queued, will receive another answer later
+            if (state == "00") { // request has been queued, will receive another answer later
                 log_debug("analyseDataResponse - Request queued for device ${deviceID}, waiting...")
             } else if (state == "0A") { //we got an answer
                 log_debug("we got an answer: ${datarec}")
                 if(typeName == "dataRead1Response")
                 {
-                    updateChild(datarec)
+                    updateChild("read", datarec)
                 }
                 else if(typeName == "dataReport1Response")
                 {
@@ -800,7 +791,7 @@ def analyseDataResponse(response) {
                 }
                 else
                 {
-                    dataWrite2Response(datarec)
+                    updateChild("write", response)
                 }
                 //return datarec
             } else if (state == "0B") { // we receive a push notification
@@ -822,11 +813,12 @@ def analyseDataResponse(response) {
     } 
 }    
     
-def updateChild(response) {       
+def updateChild(updateType, response) {       
     
     log_debug("received updateChild command response: ${response}") 
     def canUpdateChild = false
     def status = response[20..21]
+    def deviceID = response[26..33]
     log_debug("updateChild - GT125 is sending another data response")
     def state = status
     //while (state != "0a") {
@@ -845,7 +837,7 @@ def updateChild(response) {
         get_data_push(response)
     } else {
         log_error("updateChild - Bad answer received, data: ${response}")//, binascii.hexlify(datarec))
-        //error_info(state,deviceID)
+        error_info(state, deviceID)
         //return False
         //break
     }
@@ -853,7 +845,6 @@ def updateChild(response) {
     if(canUpdateChild) {
         //Now we try to find the child, and if found then send it the payload
         try {
-            def deviceID = response[26..33]
             def resultDevice = getChildDevices().find {
                 it.deviceNetworkId == deviceID
             }
@@ -866,43 +857,43 @@ def updateChild(response) {
                 switch(commandType) {
                     case data_temperature:
                         def temperature = get_temperature(response)
-                        resultDevice.processChildResponse([type: "temperature", value: temperature])
+                        resultDevice.processChildResponse([updateType: updateType, type: "temperature", value: temperature])
                     break
                     case data_setpoint:
                         def setPoint = get_temperature(response)
-                        resultDevice.processChildResponse([type: "set_point", value: setPoint])
+                        resultDevice.processChildResponse([updateType: updateType, type: "set_point", value: setPoint])
                     break
                     case data_heat_level:
                         def heatLevel = get_heat_level(response)
-                        resultDevice.processChildResponse([type: "heat_level", value: heatLevel])
+                        resultDevice.processChildResponse([updateType: updateType, type: "heat_level", value: heatLevel])
                     break
                     case data_mode:
                         def mode = get_mode(response)
-                        resultDevice.processChildResponse([type: "mode", value: mode])
+                        resultDevice.processChildResponse([updateType: updateType, type: "mode", value: mode])
                     break
                     case data_away:
                         def away = get_away(response)
-                        resultDevice.processChildResponse([type: "away", value: away])
+                        resultDevice.processChildResponse([updateType: updateType, type: "away", value: away])
                     break
                     case data_max_temp:
                         def tempmax = get_temperature(response)
-                        resultDevice.processChildResponse([type: "max_temp", value: tempmax])
+                        resultDevice.processChildResponse([updateType: updateType, type: "max_temp", value: tempmax])
                     break
                     case data_min_temp:
                         def tempmin = get_temperature(response)
-                        resultDevice.processChildResponse([type: "min_temp", value: tempmin])
+                        resultDevice.processChildResponse([updateType: updateType, type: "min_temp", value: tempmin])
                     break        
                     case data_load:
                         def wattload = get_power_load(response)
-                        resultDevice.processChildResponse([type: "load", value: wattload])
+                        resultDevice.processChildResponse([updateType: updateType, type: "load", value: wattload])
                     break
                     case data_power_connected:
                         def wattoveride = get_power_load(response)
-                        resultDevice.processChildResponse([type: "power_connected", value: wattoveride])
+                        resultDevice.processChildResponse([updateType: updateType, type: "power_connected", value: wattoveride])
                     break
                     case data_display2:
                         def outdoorTemp = get_temperature(response)
-                        resultDevice.processChildResponse([type: "outdoorTemperature", value: outdoorTemp])
+                        resultDevice.processChildResponse([updateType: updateType, type: "outdoorTemperature", value: outdoorTemp])
                     break
                     default:
                         log_error("updateChild - Command not found!")
@@ -959,47 +950,20 @@ def dataReport2Response(response) {
     }
 }
 
-def dataWrite2Response(response) {
-    log_debug("received dataWrite2Response command response: ${response}")
-    def status = response[20..21]
-    log_debug("dataWrite2Response - GT125 is sending another data response")
-    def deviceID = response[26..33]
-    log_debug("deviceID: ${deviceID}")
-    //while (state != "0a") {
-    //datarec = sock.recv(1024)
-    //state = binascii.hexlify(datarec)[20..21]
-    log_debug("status: ${status}")
-    if (status == "00") { // request has been queued, will receive another answer later
-        log_debug("dataWrite2Response - Request queued for device ${deviceID}, waiting...")
-    } else if (status == "0A") { //we got an answer
-        log_debug("we got an answer: ${response}")
-        updateChild(response)
-        //break
-    } else if (status == "0B") { // we receive a push notification
-        log_debug("we receive a push notification")
-        get_data_push(response)
-    } else {
-        log_error("dataWrite2Response - Bad answer received, data: ${response}")//, binascii.hexlify(datarec))
-        error_info(state, deviceID)
-        //return False
-        //break
-    }
-}
-
-def error_info(bug, device){
-    if (bug == 'FF' || bug == 'ff'){
+def error_info(bug, device) {
+    if (bug == 'FF' || bug == 'ff') {
         log_error("in request for ${device} : Request failed (${bug}).")
     } else if (bug == '02') {
         log_error("in request for ${device} : Request aborted (${bug}).")
-    } else if (bug == 'FE' || bug == 'fe'){
+    } else if (bug == 'FE' || bug == 'fe') {
         log_error("in request for ${device} : Buffer full, retry later (${bug}).")
-    } else if (bug == 'FC' || bug == 'fc'){
+    } else if (bug == 'FC' || bug == 'fc') {
         log_error("in request for ${device} : Device not responding (${bug}), no more answer, request aborted.")
-    } else if (bug == 'FB' || bug == 'fb'){
+    } else if (bug == 'FB' || bug == 'fb') {
         log_error("in request for ${device} : Abort failed, request not found in queue (${bug}).")
-    } else if (bug == 'FA' || bug == 'fa'){
+    } else if (bug == 'FA' || bug == 'fa') {
         log_error("in request for ${device} : Unknown device or destination deviceID is invalid or not a member of this network (${bug}).")
-    } else if (bug == 'FD' || bug == 'fd'){
+    } else if (bug == 'FD' || bug == 'fd') {
         log_error("in request for ${device} : Error message reserved (${bug}), info not available.")
     } else {
         log_error("in request for ${device} : Unknown error (${bug}).")
@@ -1016,9 +980,10 @@ def resetPoolCommand() {
     closeSocket()
     commandQueue.clear()
     queueSize = 0
-    state.socketErrors = 0
-	state.lastLockQuery = 0
-    state.socketState = "closed"
+    socketErrors = 0
+	lastLockQuery = 0
+    lockTime = 0
+    socketState = "closed"
 }
 
 def runAllActions1Sec()
@@ -1038,8 +1003,8 @@ def runAllActions()
 		if (!mutex.tryAcquire())
 		{
 			// Bust the lock if it is too old, indicates an issue with Hubitat eventing
-			if ((now() - state.lockTime ?: 0) > 2 * 60000) {
-				log_warn("Lock was held for 2 minutes, releasing ${now()} ${state.lockTime} ${now() - state.lockTime}")
+			if ((now() - lockTime ?: 0) > 2 * 60000) {
+				log_warn("Lock was held for 2 minutes, releasing ${now()} ${lockTime} ${now() - lockTime}")
 				mutex.release()
 			}
 		
@@ -1047,7 +1012,7 @@ def runAllActions()
 			return
 		}
 
-        state.lockTime = now()
+        lockTime = now()
 
         if (commandQueue.size() > 0)
 		{
@@ -1058,50 +1023,58 @@ def runAllActions()
                     log_debug("poolCommand sendSocketMessage commandQueue size: ${commandQueue.size()}")
                     def paramsMap = commandQueue.poll()
 
-                    if(commandQueue.size() < queueSize && queueSize != (commandQueue.size() + 1))
+                    if(paramsMap != null)
                     {
-                        log_error("poolCommand queueSize is different - queueSize: ${queueSize} - commandSize: ${commandQueue.size()}")
-                    }        
+                        if(commandQueue.size() < queueSize && queueSize != (commandQueue.size() + 1))
+                        {
+                            log_error("poolCommand queueSize is different - queueSize: ${queueSize} - commandSize: ${commandQueue.size()}")
+                        }        
 
-                    device.updateDataValue("type", paramsMap.type)
+                        device.updateDataValue("type", paramsMap.type)
 
-                    if(paramsMap.type == "getAPIKey")
-                    {
-                        log.info("Press 'Web' button on hub")
-                    }
-                    else if(paramsMap.type == "addThermostat")
-                    {
-                        log.info("Press the two buttons on the thermostat")
-                    } 
-                    else if(paramsMap.type == "closeConnexion")
-                    {
-                        log_debug("Closing Connexion")
-                        closeSocket()
-                    }
-                    
-                    if(paramsMap.data != "")
-                    {                        
-                        InterfaceUtils.sendSocketMessage(device, paramsMap.data)
-                        resetCloseSocketTimer()
-                        unschedule(runAllActions1Sec)
-                        schedule("0/5 * * * * ?", runAllActions5Sec)
-                    }
+                        if(paramsMap.type == "getAPIKey")
+                        {
+                            log.info("Press 'Web' button on hub")
+                        }
+                        else if(paramsMap.type == "addThermostat")
+                        {
+                            log.info("Press the two buttons on the thermostat")
+                        } 
+                        else if(paramsMap.type == "closeConnexion")
+                        {
+                            log_debug("Closing Connexion")
+                            closeSocket()
+                        }
 
-                    pauseExecution(1000)
+                        if(paramsMap.data != "")
+                        {                        
+                            InterfaceUtils.sendSocketMessage(device, paramsMap.data)
+                            resetCloseSocketTimer()
+                            unschedule(runAllActions1Sec)
+                            schedule("0/5 * * * * ?", runAllActions5Sec)
+                        }
+
+                        pauseExecution(1000)
+                    }
                 } catch(e) {
                     log_error("poolCommand: resetting pool command exception = [${e}]")
                 }                    
             }
 		}
         
+        if(commandQueue.size() > 0)
+        {
+            log_debug("Setting queueSize: ${commandQueue.size()}")
+        }
         queueSize = commandQueue.size()
                     
         def duration = (pollIntervals.toInteger() ?: 60) * 1000
-		if (now() - state.lastLockQuery >= duration)
+		if (now() - lastLockQuery >= duration)
 		{
 			resetCloseSocketTimer()
-			if (state.socketState != "closed" && commandQueue.size() == 0) {
-    			log_debug("Trying to close socket")
+			if (socketState != "closed" && commandQueue.size() == 0) {
+    			
+                log_debug("Trying to close socket")
                 closeSocket()
 			}	
 		}
@@ -1116,11 +1089,11 @@ def runAllActions()
 
 def resetCloseSocketTimer()
 {
-    state.lastLockQuery = now()
+    lastLockQuery = now()
 }
 
 def openSocket() {
-	if (state.socketState == "open") {
+	if (socketState == "open") {
 		log_debug("openSocket: Socket already opened.")
 		return true
 	}
@@ -1130,9 +1103,9 @@ def openSocket() {
 		InterfaceUtils.socketConnect(device, sinopehubip, sinopehubport.toInteger(), byteInterface: true)
 		//pauseExecution(1000)
         pauseExecution(100)
-		state.socketState = "open"
+		socketState = "open"
 		log_debug("openSocket: Socket opened.")
-		state.socketErrors = 0
+		socketErrors = 0
 		return true
 	}
 	catch(e) {
@@ -1144,18 +1117,18 @@ def openSocket() {
 
 def closeSocket() {
 	log_debug("closeSocket: Socket close requested.")
-	state.socketState = "closing"
+	socketState = "closing"
     InterfaceUtils.socketClose(device)
-	state.socketState = "closed"
+	socketState = "closed"
 	pauseExecution(100)
 	log_debug("closeSocket: Socket closed.")
 	return true
 }
 
 def socketStatus(String message) {
-	log_warn("socketStatus - Socket [${state.socketState}]  Message [${message}]")
+	log_warn("socketStatus - Socket [${socketState}]  Message [${message}]")
 	
-	if (state.socketState == "closed") 
+	if (socketState == "closed") 
     { 
         return 
     }
@@ -1163,27 +1136,27 @@ def socketStatus(String message) {
 	switch(message) {
 		case "send error: Broken pipe (Write failed)":
 			closeSocket()
-			state.socketState = "closed"
+			socketState = "closed"
 			log_debug("socketStatus - Write Failed - Attempting reconnect")
 			return //openSocket()
 			break;
 		case "receive error: Stream closed.":
 		case "receive error: Stream is closed":
-			state.socketErrors = state.socketErrors + 1
-			if ((state.socketState != "closing") && (SocketErrors < 10)) {
+			socketErrors = socketErrors + 1
+			if ((socketState != "closing") && (SocketErrors < 10)) {
 				//closeSocket()
 				//log_debug("socketStatus - Stream Closed - Attempting reconnect [${SocketErrors}]")
 				return //openSocket()
 			}
-			//state.socketState = "closed"
-			if (state.socketErrors > 9) {
+			//socketState = "closed"
+			if (socketErrors > 9) {
 				log_debug("socketStatus - Stream Closed - Too many reconnects - execute initialize() to restart")
 			}
 			return
 			break;
 		case "send error: Socket closed":
 			closeSocket()
-			state.socketState = "closed"
+			socketState = "closed"
 			log_debug("socketStatus - Socket Closed - Attempting reconnect")
 			return //openSocket()
 			break;
@@ -1200,7 +1173,7 @@ private sendEventPublish(evt)	{
 //	log.debug pub
 }
 
-def invert(id){
+def invert(id) {
     log_debug("invert id:${id}")
     """The Api_ID must be sent in reversed order"""
     def k1 = id[14..15]
@@ -1225,7 +1198,7 @@ def getAPIKey() {
     sendCommand(makeRequest("getAPIKey", byteArrayToHexString(key_request(invert(sinopehubid)))))
 }
 
-def sendRequest(dni, paramsMap){ //data
+def sendRequest(dni, paramsMap) { //data
     synchronized(this) {
         log_debug("sendRequest - login_request:${byteArrayToHexString(login_request())}")
         sendCommand(makeRequest("sendRequestResponse", byteArrayToHexString(login_request())))
@@ -1234,33 +1207,37 @@ def sendRequest(dni, paramsMap){ //data
     }
 }
 
-def login_request(){
+def login_request() {
     //log_debug("login_request")
-    def apiKey = device.getDataValue("ApiKey")
-    //log_debug("apiKey ${apiKey}")
-    def login_data = "550012001001"+invert(sinopehubid)+apiKey
+    if(state.APIKey == null)
+    {
+        log_error("APIkey is invalid! You need to acquire the APIkey by pressing 'Get APIkey' button")
+    }
+
+    //log_debug("state.APIKey ${state.APIKey}")
+    def login_data = "550012001001"+invert(sinopehubid)+state.APIKey
     def login_crc = hexStringToByteArray(crc_count(hexStringToByteArray(login_data)))
     return (hexStringToByteArray(login_data).toList()+login_crc.toList()) as byte[]
 }
 
-def ping_request(){
+def ping_request() {
     def ping_data = "550002001200"
     def ping_crc = hexStringToByteArray(crc_count(hexStringToByteArray(ping_data)))
     return (hexStringToByteArray(ping_data).toList()+ping_crc.toList()) as byte[]
 }
 
-def crc_count(bufer){
+def crc_count(bufer) {
     //log_debug("crc_count ${byteArrayToHexString(bufer)}")
     def hexdigest = crc8Digest(bufer)
     //log_debug("crc_count hexdigest: ${hexdigest}")
     return hexdigest;
 }
 
-def crc_check(bufer){
+def crc_check(bufer) {
     //log_debug("crc_check ${byteArrayToHexString(bufer)}")
     def hexdigest = crc8Digest(bufer)
     //log_debug("crc_check hexdigest: ${hexdigest}")
-    if(hexdigest == "00"){
+    if(hexdigest == "00") {
         //log_debug("crc8Digest(bufer) == 00")
         return "00"
     }
@@ -1268,13 +1245,13 @@ def crc_check(bufer){
     return None
 }
 
-def key_request(serial){
+def key_request(serial) {
     def key_data = "55000A000A01"+serial
     def key_crc = hexStringToByteArray(crc_count(hexStringToByteArray(key_data)))
     return (hexStringToByteArray(key_data).toList() + key_crc.toList()) as byte[]
 }
 
-def retreive_key(data){
+def retreive_key(data) {
     def size = data.size()
     def binary = data[18..size-1]
     def key = binary[0..15]
@@ -1321,7 +1298,7 @@ def crc8Update(bytes_)
 {
     //debug("crc8Update - start")
     def sum = 0x00
-    for (byte_ in bytes_){
+    for (byte_ in bytes_) {
         Integer position = (sum^byte_) as Integer
         sum = crc8Table[position]
     }
@@ -1343,7 +1320,7 @@ def crc8Digest(data)
     return hex.padLeft(2, "0")
 }
 
-def packInt(int data){
+def packInt(int data) {
     def array = [(byte)((data >> 0) & 0xff),
                  (byte)((data >> 8) & 0xff),
                  (byte)((data >> 16) & 0xff),
@@ -1351,7 +1328,7 @@ def packInt(int data){
     return array
 }
 
-def unpackInt(byte[] data){    
+def unpackInt(byte[] data) {    
     if (data == null || data.length != 4) return 0x0;
     // ----------
     return (int)( // NOTE: type cast not necessary for int
@@ -1362,7 +1339,7 @@ def unpackInt(byte[] data){
             );
 }
 
-/*def get_seq(seq){ // could be improuved
+/*def get_seq(seq) { // could be improuved
     if (seq == 0) {
         seq = seq_num
     }
@@ -1370,10 +1347,10 @@ def unpackInt(byte[] data){
     return seq.toString()
 }*/
 
-def get_seq(seq){ // could be improuved
+def get_seq(seq) { // could be improuved
     def sequence = ""
     Random random = new Random()
-    //for _ in range(4){
+    //for _ in range(4) {
     1.upto(4) {
         //value = randint(10, 99)
         value = random.nextInt(89) + 10
@@ -1385,18 +1362,18 @@ def get_seq(seq){ // could be improuved
     return sequence
 }
 
-def count_data(data){
+def count_data(data) {
     log_debug("count_data - data is ${data}")
     def size = data.length()/2 as Integer
     return byteArrayToHexString(packInt(size)[0..0] as byte[])
 }
 
-def count_data_frame(data){
+def count_data_frame(data) {
     def size = data.length()/2 as Integer
     return byteArrayToHexString(packInt(size)[0..1] as byte[])
 }
 
-def data_read_request(String... arg){ // command,unit_id,data_app
+def data_read_request(String... arg) { // command,unit_id,data_app
     log_debug("data_read_request - arg is ${arg}")
     def head = "5500"
 //    data_command = arg[0]
@@ -1416,7 +1393,7 @@ def data_read_request(String... arg){ // command,unit_id,data_app
     return paramsMap
 }
 
-def data_report_request(String... arg){ // data = size+time or size+temperature (command,unit_id,data_app,data)
+def data_report_request(String... arg) { // data = size+time or size+temperature (command,unit_id,data_app,data)
     log_debug("data_report_request - arg is ${arg}")
     def head = "5500"
 //    data_command = arg[0]
@@ -1437,7 +1414,7 @@ def data_report_request(String... arg){ // data = size+time or size+temperature 
     return paramsMap
 }
 
-def data_write_request(String... arg){ // data = size+data to send (command,unit_id,data_app,data)
+def data_write_request(String... arg) { // data = size+data to send (command,unit_id,data_app,data)
     log_debug("data_write_request - arg is ${arg}")
     def head = "5500"
 //    data_command = arg[0]
