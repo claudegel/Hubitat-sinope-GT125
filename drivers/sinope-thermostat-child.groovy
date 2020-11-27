@@ -51,6 +51,7 @@ import groovy.transform.Field
 metadata {
 	definition (name: "Sinope Thermostat", namespace: "rferrazguimaraes", author: "Rangner Ferraz Guimaraes")
     { 
+        capability "Initialize"
         capability "Actuator"
         capability "Sensor"
         capability "Thermostat"
@@ -60,9 +61,12 @@ metadata {
         
 		attribute "outdoorTemp", "string"
 		attribute "outputPercentDisplay", "number"
+        attribute "targetTemp", "number"
+        attribute "currMode", "string"
+        attribute "statusText", "string"
+        
         command "tempUp"
         command "tempDown"
-        //command "test"
 	}
     
     preferences {
@@ -77,42 +81,49 @@ metadata {
     }
 }
 
-def installed(){
-    log_debug("Installed device.")
+def installed() {
+    log_debug("installed()")
     configure()
 }
 
-def configure(){    
-    log.warn "configure..."
-	//logDebug "binding to Thermostat cluster"
-    //unschedule()
-    //schedule("0 0 0/1 1/1 * ? *", refreshHourly)
-    //schedule("0 0 3 1/1 * ? *", refreshDaily)
-    //schedule("0 0/5 * 1/1 * ? *", refreshInfo)
+def initialize() {
+    log_debug("initialize()")
+    configure()
+}
 
+def configure() {    
+    log.warn "configure()"
+
+    unschedule()
     // Set unused default values (for Google Home Integration)
-	sendEvent(name: "thermostatMode", value: "off", isStateChange: true)
-	sendEvent(name: "thermostatFanMode", value: "auto", isStateChange: true)
-	sendEvent(name: "thermostatOperatingState", value: "idle", isStateChange: true)
-	sendEvent(name: "thermostatSetpoint", value: 18, isStateChange: true)
-	sendEvent(name: "heatingSetpoint", value: 18, isStateChange: true)
-	sendEvent(name: "coolingSetpoint", value: 30, isStateChange: true)
-    sendEvent(name: "temperature", value: 20, isStateChange: true)
-    updateDataValue("lastRunningMode", "heat")
+//	sendEvent(name: "thermostatMode", value: "off", isStateChange: true)
+//	sendEvent(name: "thermostatFanMode", value: "auto", isStateChange: true)
+//	sendEvent(name: "thermostatOperatingState", value: "idle", isStateChange: true)
+//	sendEvent(name: "thermostatSetpoint", value: 18, isStateChange: true)
+//	sendEvent(name: "heatingSetpoint", value: 18, isStateChange: true)
+//	sendEvent(name: "coolingSetpoint", value: 30, isStateChange: true)
+//    sendEvent(name: "temperature", value: 20, isStateChange: true)
+//    sendEvent(name: "targetTemp", value: 20, isStateChange: true)
+//    updateDataValue("lastRunningMode", "heat")
 
     poll()
 }
 
-def refresh(){
+def updated() {
+    log_debug("updated()")
+    configure()    
+}
+
+def refresh() {
     //Default refresh method which calls immediate update and ensures it is scheduled	
 	refreshInfo()
 }
 
-def refreshHourly(){
+def refreshHourly() {
     //parent.set_hourly_report()
 }
 
-def refreshDaily(){
+def refreshDaily() {
      parent.set_daily_report(device.deviceNetworkId) 
 }
 
@@ -127,27 +138,29 @@ def refreshInfo()
 def tempUp() {
     log.debug("tempUp()")
     
-    def newSetpoint = device.currentValue("heatingSetpoint")
-    if (newSetpoint != null){
+    def targetTemp = device.currentValue("targetTemp")
+    if (targetTemp != null) {
         switch (location?.getTemperatureScale()) {
             case "C":
-            newSetpoint = FormatTemp(device.currentValue("heatingSetpoint") + 0.5, false)
-            if (newSetpoint <= 5) {
-                newSetpoint = 5
+            targetTemp = FormatTemp(targetTemp + 0.5, false)
+            if (targetTemp <= 5) {
+                targetTemp = 5
             }      
             break;
 
             default:
-            newSetpoint = FormatTemp(device.currentValue("heatingSetpoint") + 1, false)
-            if (newSetpoint <= 41) {
-                newSetpoint = 41
+            targetTemp = FormatTemp(targetTemp + 1, false)
+            if (targetTemp <= 41) {
+                targetTemp = 41
             }  
             break;
         }
+        
+        updateEvents(temperature: targetTemp, updateDevice: true)
     }
     
-    unschedule(setTemperature)
-    runIn(2, setTemperature, [data:[newSetpoint, device.deviceNetworkId]])
+    //unschedule(setTemperature)
+    //runIn(2, setTemperature, [data:[newSetpoint, device.deviceNetworkId]])
     /*def step = 0.5 
     def targetTemp = device.currentValue("thermostatSetpoint")
     def value = targetTemp + step
@@ -157,27 +170,29 @@ def tempUp() {
 def tempDown() {
     log_debug("tempDown()")
     
-    def newSetpoint = device.currentValue("heatingSetpoint")
-    if (newSetpoint != null){
+    def targetTemp = device.currentValue("targetTemp")
+    if (targetTemp != null) {
         switch (location?.getTemperatureScale()) {
             case "C":
-            newSetpoint = FormatTemp(device.currentValue("heatingSetpoint") - 0.5, false)
-            if (newSetpoint <= 5) {
-                newSetpoint = 5
+            targetTemp = FormatTemp(targetTemp - 0.5, false)
+            if (targetTemp <= 5) {
+                targetTemp = 5
             }      
             break;
 
             default:
-            newSetpoint = FormatTemp(device.currentValue("heatingSetpoint") - 1, false)
-            if (newSetpoint <= 41) {
-                newSetpoint = 41
+            targetTemp = FormatTemp(targetTemp - 1, false)
+            if (targetTemp <= 41) {
+                targetTemp = 41
             }  
             break;
         }
+        
+        updateEvents(temperature: targetTemp, updateDevice: true)
     }
     
-    unschedule(setTemperature)
-    runIn(2, setTemperature, [data:[newSetpoint, device.deviceNetworkId]])
+    //unschedule(setTemperature)
+    //runIn(2, setTemperature, [data:[newSetpoint, device.deviceNetworkId]])
     //parent.childSetTemp(newSetpoint, device.deviceNetworkId)
     
     /*def step = 0.5
@@ -186,18 +201,18 @@ def tempDown() {
   	parent.childSetTemp(value, device.deviceNetworkId)*/
 }
 
-def setTemperature(newSetPoint, id)
+/*def setTemperature(newSetPoint, id)
 {
     log_debug("setTemperature newSetPoint: ${newSetPoint} - id: ${id}")
     sendEvent(name: "thermostatSetpoint", value: newSetPoint, unit: location?.getTemperatureScale())
     sendEvent(name: "heatingSetpoint", value: newSetPoint, unit: location?.getTemperatureScale())
     sendEvent(name: "coolingSetpoint", value: newSetPoint, unit: location?.getTemperatureScale())
     parent.childSetTemp(newSetPoint, id)
-}
+}*/
 
-def test(){    
-    log_warn("teste...")
-    refresh()
+def setTemperature(Double value) {
+    log.debug "Executing 'setTemperature' with ${value}"
+    updateEvents(temperature: value, updateDevice: true)
 }
 
 def poll() {
@@ -211,17 +226,19 @@ def poll() {
     }
 }
 
-def setHeatingSetpoint(newSetpoint) {
-    log_debug("setHeatingSetpoint() newSetpoint: ${newSetpoint}")
-    unschedule(setTemperature)
-    runIn(2, setTemperature, [data:[newSetpoint, device.deviceNetworkId]])
+def setHeatingSetpoint(Double value) {
+    log_debug("setHeatingSetpoint() newSetpoint: ${value}")
+    updateEvents(temperature: value, updateDevice: true)
+    //unschedule(setTemperature)
+    //runIn(2, setTemperature, [data:[newSetpoint, device.deviceNetworkId]])
 }
 
-def setThermostatSetpoint(newSetpoint) {
-    log_debug("setThermostatSetpoint() temperature: ${newSetpoint}")
-    sendEvent(name: "heatingSetpoint", value: newSetpoint, unit: location?.getTemperatureScale())
-    unschedule(setTemperature)
-    runIn(2, setTemperature, [data:[newSetpoint, device.deviceNetworkId]])
+def setThermostatSetpoint(Double value) {
+    log_debug("setThermostatSetpoint() temperature: ${value}")
+    updateEvents(temperature: value, updateDevice: true)
+    //sendEvent(name: "heatingSetpoint", value: newSetpoint, unit: location?.getTemperatureScale())
+    //unschedule(setTemperature)
+    //runIn(2, setTemperature, [data:[newSetpoint, device.deviceNetworkId]])
 }
 
 def getTemperatureScale() {
@@ -232,14 +249,20 @@ def getTemperatureScale() {
 //Just log that they were triggered for troubleshooting
 def heat() {
 	log_debug("heat()")
+    def heatPoint = device.currentValue("heatingSetpoint")
+    updateEvents(mode: "heat", temperature: heatPoint, updateDevice: true)
 }
 
 def emergencyHeat() {
 	log_debug("emergencyHeat()")
 }
 
-def setThermostatMode(thermostatMode) {
-	log_debug("setThermostatMode() - ${thermostatMode}")
+def setThermostatMode(String newMode) {
+	log_debug("setThermostatMode() - ${newMode}")
+    def currMode = device.currentValue("thermostatMode")
+    if (currMode != newMode){
+        updateEvents(mode: newMode, updateDevice: true)
+    }
 }
 
 def fanOn() {
@@ -254,49 +277,56 @@ def fanCirculate() {
 	log_debug("fanCirculate mode is not available for this device")
 }
 
-def setThermostatFanMode(fanMode) {
+def setThermostatFanMode(String value) {
 	log_debug("setThermostatFanMode is not available for this device - ${fanMode}")
 }
 
 def cool() {
 	log_debug("cool mode is not available for this device")
+    //def coolPoint = device.currentValue("coolingSetpoint")
+    //updateEvents(mode: "cool", temperature: coolPoint, updateDevice: true)
 }
 
-def setCoolingSetpoint(temperature) {
+def setCoolingSetpoint(Double value) {
 	log_debug("setCoolingSetpoint is not available for this device")
+    updateEvents(temperature: value, updateDevice: true)
 }
 
-def setSchedule(schedule){
+def setSchedule(schedule) {
     log_debug("setSchedule is not available for this device")
 }
 
 def auto() {
 	log_debug("emergencyHeat mode is not available for this device. => Defaulting to heat mode instead.")
-    heat()
+    updateEvents(mode: "auto", updateDevice: true)
 }
 
 def off() {
 	log_debug("off()")
+    updateEvents(mode: "off", updateDevice: true)
 }
 
 def processChildResponse(response)
 {
+    def isRead = response.updateType == "read"
 	//Response received from Neviweb Hub so process it (mainly used for refresh, but could also process the success/fail messages)
     log_debug("received processChildResponse response: ${response} unit: ${location?.getTemperatureScale()}")
     switch(response.type) {
         case "temperature":
-            def temp = FormatTemp(response.value, false)
-            sendEvent(name: "temperature", value: temp, unit: location?.getTemperatureScale())
+            updateEvents(temperature: response.value, updateDevice: false)
+            //def temp = FormatTemp(response.value, false)
+            //sendEvent(name: "temperature", value: temp, unit: location?.getTemperatureScale())
             //sendEvent(name:"thermostatMode", value: "heat")
-            log_debug("received processChildResponse temperature: ${temp}")        
+            //log_debug("received processChildResponse temperature: ${temp}")        
             break
         case "set_point":
             def temp = FormatTemp(response.value, false)
-            sendEvent(name: "thermostatSetpoint", value: temp, unit: location?.getTemperatureScale())
-            sendEvent(name: "heatingSetpoint", value: temp, unit: location?.getTemperatureScale())
-            sendEvent(name: "coolingSetpoint", value: temp, unit: location?.getTemperatureScale())
+            updateEvents(temperature: temp, updateDevice: false)
+            //sendEvent(name: "thermostatSetpoint", value: temp, unit: location?.getTemperatureScale())
+            //sendEvent(name: "heatingSetpoint", value: temp, unit: location?.getTemperatureScale())
+            //sendEvent(name: "coolingSetpoint", value: temp, unit: location?.getTemperatureScale())
             //sendEvent(name:"thermostatMode", value: "heat")
-            log_debug("received processChildResponse setPoint: ${temp}")
+            //log_debug("received processChildResponse setPoint: ${temp}")
             break
         case "heat_level":
 			sendEvent(name: "outputPercentDisplay", value: response.value)
@@ -304,9 +334,10 @@ def processChildResponse(response)
             log_debug("received processChildResponse heatLevel: ${response.value}")
             break
         case "mode":
-            sendEvent(name:"thermostatMode", value: ((response.value > 0) ? "heat" : "off"))
-            updateDataValue("lastRunningMode", ((response.value > 0) ? "heat" : "off")) // heat is the only compatible mode for this device
-            log_debug("received processChildResponse mode: ${response.value}")
+            updateEvents(mode: ((response.value > 0) ? "heat" : "off"), updateDevice: false)
+            //sendEvent(name:"thermostatMode", value: ((response.value > 0) ? "heat" : "off"))
+            //updateDataValue("lastRunningMode", ((response.value > 0) ? "heat" : "off")) // heat is the only compatible mode for this device
+            //log_debug("received processChildResponse mode: ${response.value}")
             break
         case "away":
             sendEvent(name: "away", value: response.value)
@@ -340,9 +371,93 @@ def processChildResponse(response)
     }
 }
 
-def set_outside_temperature(self, outside_temperature){
+private updateEvents(Map args){
+    log_debug("Executing 'updateEvents' with mode: ${args.mode}, temperature: ${args.temperature} and updateDevice: ${args.updateDevice}")
+    // Get args with default values
+    def mode = args.get("mode", null)
+    def temperature = FormatTemp(args.get("temperature", null), false)
+    def updateDevice = args.get("updateDevice", false)
+    Boolean turnOff = false
+    def events = []
+    
+    if (!mode){
+        mode = device.currentValue("thermostatMode")
+    } else {
+        events.add(sendEvent(name: "thermostatMode", value: mode))	   
+    }
+    
+    if (!temperature){
+        temperature = FormatTemp(device.currentValue("targetTemp"), false)
+    }
+    
+    switch(mode) {
+        case "fan":
+            events.add(sendEvent(name: "statusText", value: "Fan Mode", displayed: false))
+            events.add(sendEvent(name: "thermostatOperatingState", value: "fan only", displayed: false, isStateChange: true))
+            events.add(sendEvent(name: "targetTemp", value: null))
+            updateDataValue("lastRunningMode", "auto")
+            break
+        case "dry":
+            events.add(sendEvent(name: "statusText", value: "Dry Mode", displayed: false))
+            events.add(sendEvent(name: "thermostatOperatingState", value: "fan only", displayed: false, isStateChange: true))
+            events.add(sendEvent(name: "targetTemp", value: null))
+            updateDataValue("lastRunningMode", "auto")
+            break
+        case "heat":
+            events.add(sendEvent(name: "statusText", value: "Heating to ${temperature}°", displayed: false))
+            events.add(sendEvent(name: "thermostatOperatingState", value: "heating", displayed: false, isStateChange: true))
+            events.add(sendEvent(name: "heatingSetpoint", value: temperature, displayed: false, isStateChange: true))
+            events.add(sendEvent(name: "thermostatSetpoint", value: temperature, displayed: false, isStateChange: true))
+            events.add(sendEvent(name: "targetTemp", value: temperature))
+            updateDataValue("lastRunningMode", "heat")
+            break
+        case "cool":
+            events.add(sendEvent(name: "statusText", value: "Cooling to ${temperature}°", displayed: false))
+            events.add(sendEvent(name: "thermostatOperatingState", value: "cooling", displayed: false, isStateChange: true))
+            events.add(sendEvent(name: "coolingSetpoint", value: temperature, displayed: false, isStateChange: true))
+            events.add(sendEvent(name: "thermostatSetpoint", value: temperature, displayed: false, isStateChange: true))
+            events.add(sendEvent(name: "targetTemp", value: temperature))
+            updateDataValue("lastRunningMode", "cool")
+            break
+        case "auto":
+            events.add(sendEvent(name: "statusText", value: "Auto Mode: ${temperature}°", displayed: false))
+            events.add(sendEvent(name: "targetTemp", value: temperature))
+            updateDataValue("lastRunningMode", "auto")
+            break
+        case "off":
+            events.add(sendEvent(name: "statusText", value: "System is off", displayed: false))
+            events.add(sendEvent(name: "thermostatOperatingState", value: "idle", displayed: false, isStateChange: true))
+            updateDataValue("lastRunningMode", "off")
+            turnOff = true
+            break
+    }
+
+    if (turnOff){
+        events.add(sendEvent(name: "switch", value: "off", displayed: false))
+    } else {
+        events.add(sendEvent(name: "switch", value: "on", displayed: false))
+    }
+
+    if (updateDevice){
+        log_debug("Executing 'updateDevice' with temperature: ${temperature} and turnOff: ${turnOff}")
+        if(temperature != null) {
+	        runIn(2, 'updateDevice', [data:[temperature, turnOff]])
+        } else {
+            log_error("Trying to set temperature to null")
+        }
+    }
+}
+
+private updateDevice(temperature, turnOff) {
+    log_debug("updateDevice with temperature: ${temperature} and turnOff: ${turnOff}")
+    String modeAttr = turnOff ? "currMode" : "thermostatMode"
+    def currentMode = device.currentState(modeAttr)?.value
+    parent.childSetTemp(temperature, device.deviceNetworkId)
+}
+
+def set_outside_temperature(self, outside_temperature) {
     //Send command to set new outside temperature.
-    if (outside_temperature == None){
+    if (outside_temperature == None) {
         return
     }
     
@@ -350,30 +465,30 @@ def set_outside_temperature(self, outside_temperature){
     self._outside_temperature = outside_temperature
 }
 
-def async_set_outside_temperature(self, outside_temperature){
+def async_set_outside_temperature(self, outside_temperature) {
     //Send command to set new outside temperature.
     parent.set_hourly_report(device.deviceNetworkId, outside_temperature)
     //self._outside_temperature = outside_temperature
 }
 
-def set_hvac_mode(self, hvac_mode){
+def set_hvac_mode(self, hvac_mode) {
     //Set new hvac mode.
     parent.send_time(device.deviceNetworkId)
     self._type = 10 //temp to cleanup
-    if (hvac_mode == HVAC_MODE_OFF){
+    if (hvac_mode == HVAC_MODE_OFF) {
         parent.set_mode(device.deviceNetworkId, self._type, SINOPE_MODE_OFF)
     } else if (hvac_mode == HVAC_MODE_HEAT) {
         parent.set_mode(device.deviceNetworkId, self._type, SINOPE_MODE_MANUAL)
-    } else if (hvac_mode == HVAC_MODE_AUTO){
+    } else if (hvac_mode == HVAC_MODE_AUTO) {
         parent.set_mode(device.deviceNetworkId, self._type, SINOPE_MODE_AUTO)
     } else {
         log_error("Unable to set hvac mode: %s.", hvac_mode)
     }
 }
 
-def set_preset_mode(self, preset_mode){
+def set_preset_mode(self, preset_mode) {
     // Activate a preset.
-    if (preset_mode == self.preset_mode){
+    if (preset_mode == self.preset_mode) {
         return
     }
     
@@ -381,8 +496,8 @@ def set_preset_mode(self, preset_mode){
     if (preset_mode == PRESET_AWAY) {
         //Set away mode on device, away_on = 2 away_off =0
         parent.set_away_mode(device.deviceNetworkId, 2)
-    } else if (preset_mode == PRESET_BYPASS){
-        if (SINOPE_BYPASSABLE_MODES.contains(self._operation_mode)){
+    } else if (preset_mode == PRESET_BYPASS) {
+        if (SINOPE_BYPASSABLE_MODES.contains(self._operation_mode)) {
             parentset_away_mode(device.deviceNetworkId, 0)      
             parent.set_mode(device.deviceNetworkId, self._type, self._operation_mode | SINOPE_BYPASS_FLAG)
         } else if (preset_mode == PRESET_NONE) {
@@ -395,7 +510,7 @@ def set_preset_mode(self, preset_mode){
     }
 }
 
-private timeStringToMins(String timeString){
+private timeStringToMins(String timeString) {
 	if (timeString?.contains(':')) {
     	def hoursandmins = timeString.split(":")
         def mins = hoursandmins[0].toInteger() * 60 + hoursandmins[1].toInteger()
@@ -410,7 +525,7 @@ private minsToTimeString(Integer intMins) {
     return timeString
 }
 
-private timeStringToHoursMins(String timeString){
+private timeStringToHoursMins(String timeString) {
 	if (timeString?.contains(':')) {
     	def hoursMins = timeString.split(":")
         log_debug("${timeString} converted to ${hoursMins[0]}:${hoursMins[1]}")
@@ -426,9 +541,9 @@ private minsToHoursMins(Integer intMins) {
     return hoursMins
 }
 
-def FormatTemp(temp, invert){
-	if (temp != null){
-		if(invert){
+def FormatTemp(temp, invert) {
+	if (temp != null) {
+		if(invert) {
 			float i = Float.parseFloat(temp+"")
 			switch (location?.getTemperatureScale()) {
 				case "C":
