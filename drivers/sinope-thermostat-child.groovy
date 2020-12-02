@@ -14,8 +14,8 @@
  *
  *  Author: Rangner Ferraz Guimaraes (rferrazguimaraes)
  *  Date: 2020-11-22
- *  Version: 1.0
- *  
+ *  Version: 1.0 - Initial commit
+ *  Version: 1.1 - Fixed thread issues + added options to thermostat
  */
 
 /*
@@ -41,12 +41,19 @@ import groovy.transform.Field
 @Field final List SINOPE_BYPASSABLE_MODES = [MODE.SINOPE_MODE_FREEZE_PROTECT, MODE.SINOPE_MODE_AUTO, MODE.SINOPE_MODE_AWAY]
 @Field final List SINOPE_MODE_AUTO_BYPASS = [MODE.SINOPE_MODE_AUTO, MODE.SINOPE_BYPASS_FLAG]
 
-@Field final List SUPPORTED_HVAC_MODES = ["HVAC_MODE_OFF", "HVAC_MODE_AUTO", "HVAC_MODE_HEAT"]
-
 @Field final String PRESET_BYPASS = 'temporary'
 @Field final List PRESET_MODES = ["PRESET_NONE", "PRESET_AWAY", "PRESET_BYPASS"]
 
 @Field final List IMPLEMENTED_DEVICE_TYPES = [10, 20, 21]
+
+@Field final Map pollIntervalOptions = [0:"off", 300:"5 minutes", 600:"10 minutes", 900:"15 minutes", 1800:"30 minutes", 3600:"60 minutes"]
+@Field final Map displaySecondaryOptions = [0:"SetPoint", 1:"Outside Temperature"]
+@Field final Map temperatureFormatOptions = [0:"Celsius", 1:"Farenheit"]
+@Field final Map timeFormatOptions = [0:"24h", 1:"12h"]
+@Field final Map backlightOptions = [0:"Automatic", 100:"Always On"]
+@Field final Map earlyStartOptions = [0:"Disabled", 1:"Enabled"]
+@Field final Map keypadOptions = [0:"Unlocked", 1:"Locked"]
+@Field final Map temperatureSetPointOptions = [5.0:"5.0 C", 5.5:"5.5 C", 6.0:"6.0 C", 6.5:"6.5 C", 7.0:"7.0 C", 7.5:"7.5 C", 8.0:"8.0 C", 8.5:"8.5 C", 9:"9.0 C", 9.5:"9.5 C", 10.0:"10.0 C", 10.5:"10.5 C", 11.0:"11.0 C", 11.5:"11.5 C", 12.0:"12.0 C", 12.5:"12.5 C", 13.0:"13.0 C", 13.5:"13.5 C", 14.0:"14.0 C", 14.5:"14.5 C", 15.0:"15.0 C", 15.5:"15.5 C", 16.0:"16.0 C", 16.5:"16.5 C", 17.0:"17.0 C", 17.5:"17.5 C", 18.0:"18.0 C", 18.5:"18.5 C", 19.0:"19.0 C", 19.5:"19.5 C", 20.0:"20.0 C", 20.5:"20.5 C", 21.0:"21.0 C", 21.5:"21.5 C", 22.0:"22.0 C", 22.5:"22.5 C", 23.0:"23.0 C", 23.5:"23.5 C", 24.0:"24.0 C", 24.5:"24.5 C", 25.0:"25.0 C", 25.5:"25.5 C", 26.0:"26.0 C", 26.5:"26.5 C", 27.0:"27.0 C", 27.5:"27.5 C", 28.0:"28.0 C", 28.5:"28.5 C", 29.0:"29.0 C", 29.5:"29.5 C", 30.0:"30.0 C"]
 
 metadata {
 	definition (name: "Sinope Thermostat", namespace: "rferrazguimaraes", author: "Rangner Ferraz Guimaraes")
@@ -60,7 +67,7 @@ metadata {
 		capability "Refresh"
         
 		attribute "outdoorTemp", "string"
-		attribute "outputPercentDisplay", "number"
+		attribute "heatLevel", "number"
         attribute "targetTemp", "number"
         attribute "currMode", "string"
         attribute "statusText", "string"
@@ -70,12 +77,18 @@ metadata {
 	}
     
     preferences {
-        input name: "pollIntervals", type: "enum", title: "Set the Poll Interval.", options: [0:"off", 300:"5 minutes", 600:"10 minutes", 900:"15 minutes", 1800:"30 minutes", 3600:"60 minutes"], required: true, defaultValue: "600"
-        //input name: "prefDisplayOutdoorTemp", type: "bool", title: "Enable display of outdoor temperature", defaultValue: true
-        //input name: "prefDisplayClock", type: "bool", title: "Enable display of clock", defaultValue: true
-        //input name: "prefDisplayBacklight", type: "bool", title: "Enable display backlight", defaultValue: true
-        //input name: "prefKeyLock", type: "bool", title: "Enable keylock", defaultValue: false
-    	input("logDebug", "bool", title: "Enable debug logging", defaultValue: false)
+        input name: "pollIntervals", type: "enum", title: "Set the Poll Interval.", options: pollIntervalOptions, defaultValue: "600", required: true 
+        input name: "prefDisplaySecondary", type: "enum", title: "Secondary Display", options: displaySecondaryOptions, defaultValue: "1", required: true
+        input name: "prefDisplayTemperatureFormat", type: "enum", title: "Temperature Format", options: temperatureFormatOptions, defaultValue: "0", required: true
+        input name: "prefDisplayTimeFormat", type: "enum", title: "Time Format", options: timeFormatOptions, defaultValue: "0", required: true
+        input name: "prefDisplayBacklight", type: "enum", title: "Backlight", options: backlightOptions, defaultValue: "0", required: true
+        input name: "prefDisplayEarlyStart", type: "enum", title: "Early Start", options: earlyStartOptions, defaultValue: "0", required: true
+        input name: "prefDisplayKeypad", type: "enum", title: "Keypad", options: keypadOptions, defaultValue: "0", required: true
+        input name: "prefMinSetPoint", type: "enum", title: "Min. Setpoint", options: temperatureSetPointOptions, defaultValue: "5.0", required: true
+        input name: "prefMaxSetPoint", type: "enum", title: "Max. Setpoint", options: temperatureSetPointOptions, defaultValue: "30.0", required: true
+        input name: "prefAwaySetPoint", type: "enum", title: "Away Setpoint", options: temperatureSetPointOptions, defaultValue: "5.0", required: true
+        //input name: "wakeUpIntervalInMins", "number", title: "Wake Up Interval (min). Default 5mins.", description: "Wakes up and send\receives new temperature setting", range: "1..30", displayDuringSetup: true
+        input("logDebug", "bool", title: "Enable debug logging", defaultValue: false)
     	input("logWarn", "bool", title: "Enable warn logging", defaultValue: false)
     	input("logError", "bool", title: "Enable error logging", defaultValue: false)
     }
@@ -83,6 +96,16 @@ metadata {
 
 def installed() {
     log_debug("installed()")
+    // Set unused default values (for Google Home Integration)
+	sendEvent(name: "thermostatMode", value: "off", isStateChange: true)
+	sendEvent(name: "thermostatFanMode", value: "auto", isStateChange: true)
+	sendEvent(name: "thermostatOperatingState", value: "idle", isStateChange: true)
+	sendEvent(name: "thermostatSetpoint", value: 18, isStateChange: true)
+	sendEvent(name: "heatingSetpoint", value: 18, isStateChange: true)
+	sendEvent(name: "coolingSetpoint", value: 30, isStateChange: true)
+    sendEvent(name: "temperature", value: 20, isStateChange: true)
+    sendEvent(name: "targetTemp", value: 20, isStateChange: true)
+    updateDataValue("lastRunningMode", "heat")
     configure()
 }
 
@@ -95,23 +118,27 @@ def configure() {
     log.warn "configure()"
 
     unschedule()
-    // Set unused default values (for Google Home Integration)
-//	sendEvent(name: "thermostatMode", value: "off", isStateChange: true)
-//	sendEvent(name: "thermostatFanMode", value: "auto", isStateChange: true)
-//	sendEvent(name: "thermostatOperatingState", value: "idle", isStateChange: true)
-//	sendEvent(name: "thermostatSetpoint", value: 18, isStateChange: true)
-//	sendEvent(name: "heatingSetpoint", value: 18, isStateChange: true)
-//	sendEvent(name: "coolingSetpoint", value: 30, isStateChange: true)
-//    sendEvent(name: "temperature", value: 20, isStateChange: true)
-//    sendEvent(name: "targetTemp", value: 20, isStateChange: true)
-//    updateDataValue("lastRunningMode", "heat")
-
     poll()
 }
 
 def updated() {
     log_debug("updated()")
-    configure()    
+    
+    parameterSetting()
+    configure()
+}
+
+def parameterSetting() {
+    log_debug("parameterSetting()")
+    parent.set_secondary_display(device.deviceNetworkId, prefDisplaySecondary.toInteger() ?: 1)
+    parent.set_temperature_format(device.deviceNetworkId, prefDisplayTemperatureFormat.toInteger() ?: 0)
+    parent.set_time_format(device.deviceNetworkId, prefDisplayTimeFormat.toInteger() ?: 0)
+    parent.set_early_start(device.deviceNetworkId, prefDisplayEarlyStart.toInteger() ?: 0)
+    parent.set_backlight_idle(device.deviceNetworkId, prefDisplayBacklight.toInteger() ?: 0)
+    parent.set_keyboard_lock(device.deviceNetworkId, prefDisplayKeypad.toInteger() ?: 0)
+    parent.set_min_setpoint(device.deviceNetworkId, FormatTemp(prefMinSetPoint ?: 5.0))
+    parent.set_max_setpoint(device.deviceNetworkId, FormatTemp(prefMaxSetPoint ?: 30.0))
+    parent.set_away_setpoint(device.deviceNetworkId, FormatTemp(prefAwaySetPoint ?: 5.0))
 }
 
 def refresh() {
@@ -124,7 +151,7 @@ def refreshHourly() {
 }
 
 def refreshDaily() {
-     parent.set_daily_report(device.deviceNetworkId) 
+     parent.set_daily_report(device.deviceNetworkId)
 }
 
 def refreshInfo()
@@ -142,14 +169,14 @@ def tempUp() {
     if (targetTemp != null) {
         switch (location?.getTemperatureScale()) {
             case "C":
-            targetTemp = FormatTemp(targetTemp + 0.5, false)
+            targetTemp = FormatTemp(targetTemp + 0.5)
             if (targetTemp <= 5) {
                 targetTemp = 5
             }      
             break;
 
             default:
-            targetTemp = FormatTemp(targetTemp + 1, false)
+            targetTemp = FormatTemp(targetTemp + 1)
             if (targetTemp <= 41) {
                 targetTemp = 41
             }  
@@ -158,13 +185,6 @@ def tempUp() {
         
         updateEvents(temperature: targetTemp, updateDevice: true)
     }
-    
-    //unschedule(setTemperature)
-    //runIn(2, setTemperature, [data:[newSetpoint, device.deviceNetworkId]])
-    /*def step = 0.5 
-    def targetTemp = device.currentValue("thermostatSetpoint")
-    def value = targetTemp + step
-  	parent.childSetTemp(value, device.deviceNetworkId)*/
 }
 
 def tempDown() {
@@ -174,14 +194,14 @@ def tempDown() {
     if (targetTemp != null) {
         switch (location?.getTemperatureScale()) {
             case "C":
-            targetTemp = FormatTemp(targetTemp - 0.5, false)
+            targetTemp = FormatTemp(targetTemp - 0.5)
             if (targetTemp <= 5) {
                 targetTemp = 5
             }      
             break;
 
             default:
-            targetTemp = FormatTemp(targetTemp - 1, false)
+            targetTemp = FormatTemp(targetTemp - 1)
             if (targetTemp <= 41) {
                 targetTemp = 41
             }  
@@ -190,25 +210,7 @@ def tempDown() {
         
         updateEvents(temperature: targetTemp, updateDevice: true)
     }
-    
-    //unschedule(setTemperature)
-    //runIn(2, setTemperature, [data:[newSetpoint, device.deviceNetworkId]])
-    //parent.childSetTemp(newSetpoint, device.deviceNetworkId)
-    
-    /*def step = 0.5
-    def targetTemp = device.currentValue("thermostatSetpoint")
-    def value = targetTemp - step
-  	parent.childSetTemp(value, device.deviceNetworkId)*/
 }
-
-/*def setTemperature(newSetPoint, id)
-{
-    log_debug("setTemperature newSetPoint: ${newSetPoint} - id: ${id}")
-    sendEvent(name: "thermostatSetpoint", value: newSetPoint, unit: location?.getTemperatureScale())
-    sendEvent(name: "heatingSetpoint", value: newSetPoint, unit: location?.getTemperatureScale())
-    sendEvent(name: "coolingSetpoint", value: newSetPoint, unit: location?.getTemperatureScale())
-    parent.childSetTemp(newSetPoint, id)
-}*/
 
 def setTemperature(Double value) {
     log.debug "Executing 'setTemperature' with ${value}"
@@ -217,10 +219,10 @@ def setTemperature(Double value) {
 
 def poll() {
     pollInterval = pollIntervals.toInteger() ?: 0
-    unschedule()
+    unschedule('poll')
     if(pollInterval > 0)
     {
-        runIn(pollInterval, poll) 
+        runIn(pollInterval, 'poll') 
         log_debug("in poll: (every ${pollInterval} seconds)")
         refresh()
     }
@@ -229,16 +231,11 @@ def poll() {
 def setHeatingSetpoint(Double value) {
     log_debug("setHeatingSetpoint() newSetpoint: ${value}")
     updateEvents(temperature: value, updateDevice: true)
-    //unschedule(setTemperature)
-    //runIn(2, setTemperature, [data:[newSetpoint, device.deviceNetworkId]])
 }
 
 def setThermostatSetpoint(Double value) {
     log_debug("setThermostatSetpoint() temperature: ${value}")
     updateEvents(temperature: value, updateDevice: true)
-    //sendEvent(name: "heatingSetpoint", value: newSetpoint, unit: location?.getTemperatureScale())
-    //unschedule(setTemperature)
-    //runIn(2, setTemperature, [data:[newSetpoint, device.deviceNetworkId]])
 }
 
 def getTemperatureScale() {
@@ -310,34 +307,26 @@ def processChildResponse(response)
 {
     def isRead = response.updateType == "read"
 	//Response received from Neviweb Hub so process it (mainly used for refresh, but could also process the success/fail messages)
-    log_debug("received processChildResponse response: ${response} unit: ${location?.getTemperatureScale()}")
+    log_debug("received processChildResponse response: ${response}")
     switch(response.type) {
         case "temperature":
-            updateEvents(temperature: response.value, updateDevice: false)
-            //def temp = FormatTemp(response.value, false)
-            //sendEvent(name: "temperature", value: temp, unit: location?.getTemperatureScale())
-            //sendEvent(name:"thermostatMode", value: "heat")
+            def temp = FormatTemp(response.value)
+            sendEvent(name: "temperature", value: temp)
             //log_debug("received processChildResponse temperature: ${temp}")        
             break
         case "set_point":
-            def temp = FormatTemp(response.value, false)
+            def temp = FormatTemp(response.value)
             updateEvents(temperature: temp, updateDevice: false)
-            //sendEvent(name: "thermostatSetpoint", value: temp, unit: location?.getTemperatureScale())
-            //sendEvent(name: "heatingSetpoint", value: temp, unit: location?.getTemperatureScale())
-            //sendEvent(name: "coolingSetpoint", value: temp, unit: location?.getTemperatureScale())
-            //sendEvent(name:"thermostatMode", value: "heat")
             //log_debug("received processChildResponse setPoint: ${temp}")
             break
         case "heat_level":
-			sendEvent(name: "outputPercentDisplay", value: response.value)
+			sendEvent(name: "heatLevel", value: response.value)
 			sendEvent(name: "thermostatOperatingState", value: ((heatLevel > 10) ? "heating" : "idle"))
             log_debug("received processChildResponse heatLevel: ${response.value}")
             break
         case "mode":
             updateEvents(mode: ((response.value > 0) ? "heat" : "off"), updateDevice: false)
-            //sendEvent(name:"thermostatMode", value: ((response.value > 0) ? "heat" : "off"))
-            //updateDataValue("lastRunningMode", ((response.value > 0) ? "heat" : "off")) // heat is the only compatible mode for this device
-            //log_debug("received processChildResponse mode: ${response.value}")
+            log_debug("received processChildResponse mode: ${response.value}")
             break
         case "away":
             sendEvent(name: "away", value: response.value)
@@ -365,8 +354,56 @@ def processChildResponse(response)
             sendEvent(name: "outdoorTemperature", value: response.value)
             log_debug("received processChildResponse outdoorTemp: ${response.value}")
             break
+        case "time":
+            sendEvent(name: "time", value: response.value)
+            log_debug("received processChildResponse time: ${response.value}")
+            break
+        case "date":
+            sendEvent(name: "date", value: response.value)
+            log_debug("received processChildResponse date: ${response.value}")
+            break
+        case "sunrise":
+            sendEvent(name: "sunrise", value: response.value)
+            log_debug("received processChildResponse sunrise: ${response.value}")
+            break
+        case "sunset":
+            sendEvent(name: "sunset", value: response.value)
+            log_debug("received processChildResponse sunset: ${response.value}")
+            break
+        case "lock":
+            sendEvent(name: "lock", value: keypadOptions.get(response.value))
+            log_debug("received processChildResponse lock: ${keypadOptions.get(response.value)}")
+            break
+        case "secondary_display":
+            sendEvent(name: "secondaryDisplay", value: displaySecondaryOptions.get(response.value))
+            log_debug("received processChildResponse secondary_display: ${displaySecondaryOptions.get(response.value)}")
+            break
+        case "temperature_format":
+            sendEvent(name: "temperatureFormat", value: temperatureFormatOptions.get(response.value))
+            log_debug("received processChildResponse temperature_format: ${temperatureFormatOptions.get(response.value)}")
+            break
+        case "time_format":
+            sendEvent(name: "timeFormat", value: timeFormatOptions.get(response.value))
+            log_debug("received processChildResponse time_format: ${timeFormatOptions.get(response.value)}")
+            break
+        case "early_start":
+            sendEvent(name: "earlyStart", value: earlyStartOptions.get(response.value))
+            log_debug("received processChildResponse early_start: ${earlyStartOptions.get(response.value)}")
+            break
+        case "away_temp":
+            sendEvent(name: "awayTemperature", value: response.value)
+            log_debug("received processChildResponse awayTemperature: ${response.value}")
+            break
+        case "backlight_state":
+            sendEvent(name: "backLightState", value: response.value)
+            log_debug("received processChildResponse backLightState: ${response.value}")
+            break
+        case "backlight_idle":
+            sendEvent(name: "backLightIdle", value: response.value)
+            log_debug("received processChildResponse backLightIdle: ${response.value}")
+            break
         default:
-            log_error("processChildResponse - Command not found!")
+            log_error("processChildResponse - Command ${response.type} not found!")
             break
     }
 }
@@ -375,10 +412,16 @@ private updateEvents(Map args){
     log_debug("Executing 'updateEvents' with mode: ${args.mode}, temperature: ${args.temperature} and updateDevice: ${args.updateDevice}")
     // Get args with default values
     def mode = args.get("mode", null)
-    def temperature = FormatTemp(args.get("temperature", null), false)
+    def temperature = FormatTemp(args.get("temperature", null))
     def updateDevice = args.get("updateDevice", false)
-    Boolean turnOff = false
+    Boolean turnOff = mode == "off"
     def events = []
+
+    if (updateDevice){
+        log_debug("Executing 'updateDevice' with temperature: ${temperature} and turnOff: ${turnOff}")
+        unschedule('updateDevice')
+        runIn(2, 'updateDevice', [data:[temperature, mode, turnOff]])
+    }
     
     if (!mode){
         mode = device.currentValue("thermostatMode")
@@ -387,7 +430,7 @@ private updateEvents(Map args){
     }
     
     if (!temperature){
-        temperature = FormatTemp(device.currentValue("targetTemp"), false)
+        temperature = FormatTemp(device.currentValue("targetTemp"))
     }
     
     switch(mode) {
@@ -405,7 +448,7 @@ private updateEvents(Map args){
             break
         case "heat":
             events.add(sendEvent(name: "statusText", value: "Heating to ${temperature}°", displayed: false))
-            events.add(sendEvent(name: "thermostatOperatingState", value: "heating", displayed: false, isStateChange: true))
+            //events.add(sendEvent(name: "thermostatOperatingState", value: "heating", displayed: false, isStateChange: true))
             events.add(sendEvent(name: "heatingSetpoint", value: temperature, displayed: false, isStateChange: true))
             events.add(sendEvent(name: "thermostatSetpoint", value: temperature, displayed: false, isStateChange: true))
             events.add(sendEvent(name: "targetTemp", value: temperature))
@@ -428,7 +471,6 @@ private updateEvents(Map args){
             events.add(sendEvent(name: "statusText", value: "System is off", displayed: false))
             events.add(sendEvent(name: "thermostatOperatingState", value: "idle", displayed: false, isStateChange: true))
             updateDataValue("lastRunningMode", "off")
-            turnOff = true
             break
     }
 
@@ -437,22 +479,32 @@ private updateEvents(Map args){
     } else {
         events.add(sendEvent(name: "switch", value: "on", displayed: false))
     }
-
-    if (updateDevice){
-        log_debug("Executing 'updateDevice' with temperature: ${temperature} and turnOff: ${turnOff}")
-        if(temperature != null) {
-	        runIn(2, 'updateDevice', [data:[temperature, turnOff]])
-        } else {
-            log_error("Trying to set temperature to null")
-        }
-    }
 }
 
-private updateDevice(temperature, turnOff) {
-    log_debug("updateDevice with temperature: ${temperature} and turnOff: ${turnOff}")
-    String modeAttr = turnOff ? "currMode" : "thermostatMode"
-    def currentMode = device.currentState(modeAttr)?.value
-    parent.childSetTemp(temperature, device.deviceNetworkId)
+private updateDevice(temperature, mode, turnOff) {
+    log_debug("updateDevice with temperature: ${temperature}, mode: ${mode} and turnOff: ${turnOff}")
+    if(temperature != null) {
+        parent.childSetTemp(device.deviceNetworkId, temperature)
+    }
+    
+    if(mode != null) {
+        String modeAttr = /*turnOff ? "currMode" :*/ "thermostatMode"
+        def currentMode = device.currentState(thermostatMode)?.value
+        if(currentMode != mode)
+        {
+            switch(mode) {
+                case "heat":
+                    set_hvac_mode(MODE.SINOPE_MODE_MANUAL)
+                break
+                case "auto":
+                    set_hvac_mode(MODE.SINOPE_MODE_AUTO)
+                break
+                case "off":
+                    set_hvac_mode(MODE.SINOPE_MODE_OFF)
+                break
+            }
+        }
+    }
 }
 
 def set_outside_temperature(self, outside_temperature) {
@@ -471,19 +523,13 @@ def async_set_outside_temperature(self, outside_temperature) {
     //self._outside_temperature = outside_temperature
 }
 
-def set_hvac_mode(self, hvac_mode) {
+def set_hvac_mode(hvac_mode) {
+    log_debug("set_hvac_mode - hvac_mode: ${hvac_mode}")
+
     //Set new hvac mode.
     parent.send_time(device.deviceNetworkId)
-    self._type = 10 //temp to cleanup
-    if (hvac_mode == HVAC_MODE_OFF) {
-        parent.set_mode(device.deviceNetworkId, self._type, SINOPE_MODE_OFF)
-    } else if (hvac_mode == HVAC_MODE_HEAT) {
-        parent.set_mode(device.deviceNetworkId, self._type, SINOPE_MODE_MANUAL)
-    } else if (hvac_mode == HVAC_MODE_AUTO) {
-        parent.set_mode(device.deviceNetworkId, self._type, SINOPE_MODE_AUTO)
-    } else {
-        log_error("Unable to set hvac mode: %s.", hvac_mode)
-    }
+    def type = 10 //temp to cleanup
+    parent.set_mode(device.deviceNetworkId, type, hvac_mode)
 }
 
 def set_preset_mode(self, preset_mode) {
@@ -498,14 +544,14 @@ def set_preset_mode(self, preset_mode) {
         parent.set_away_mode(device.deviceNetworkId, 2)
     } else if (preset_mode == PRESET_BYPASS) {
         if (SINOPE_BYPASSABLE_MODES.contains(self._operation_mode)) {
-            parentset_away_mode(device.deviceNetworkId, 0)      
+            parent.set_away_mode(device.deviceNetworkId, 0)      
             parent.set_mode(device.deviceNetworkId, self._type, self._operation_mode | SINOPE_BYPASS_FLAG)
         } else if (preset_mode == PRESET_NONE) {
             // Re-apply current hvac_mode without any preset
             parent.set_away_mode(device.deviceNetworkId, 0)
-            self.set_hvac_mode(self.hvac_mode)
+            //self.set_hvac_mode(self.hvac_mode)
         } else {
-            log_error("Unable to set preset mode: %s.", preset_mode)
+            log_error("Unable to set preset mode: ${preset_mode}.")
         }
     }
 }
@@ -541,7 +587,7 @@ private minsToHoursMins(Integer intMins) {
     return hoursMins
 }
 
-def FormatTemp(temp, invert) {
+def FormatTemp(temp, invert = false) {
 	if (temp != null) {
 		if(invert) {
 			float i = Float.parseFloat(temp+"")
@@ -587,15 +633,15 @@ def fToC(temp) {
 
 def log_debug(logData)
 {
-    if (parent.childGetDebugState() || logDebug) log.debug("Thermostat - " + logData)
+    if (parent.childGetDebugState() || logDebug) log.debug("${device} (${device.deviceNetworkId}) - " + logData)
 }
 
 def log_warn(logData)
 {
-    if (parent.childGetWarnState() || logWarn) log.warn("Thermostat - " + logData)
+    if (parent.childGetWarnState() || logWarn) log.warn("${device} (${device.deviceNetworkId}) - " + logData)
 }
 
 def log_error(logData)
 {
-    if (parent.childGetErrorState() ||logError) log.error("Thermostat - " + logData)
+    if (parent.childGetErrorState() ||logError) log.error("${device} (${device.deviceNetworkId}) - " + logData)
 }
