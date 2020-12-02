@@ -1588,7 +1588,7 @@ def get_seq(seq) { // could be improuved
         value = random.nextInt(89) + 10
         sequence += value.toString()
     }
-    sequence = "64951454" // to remove rfg
+    //sequence = "64951454" // to remove rfg
     log_debug("sequencial number = ${sequence}")
     return sequence
 }
