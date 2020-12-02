@@ -118,7 +118,7 @@ import hubitat.device.Protocol
 @Field static java.util.concurrent.ConcurrentLinkedQueue commandQueue = new java.util.concurrent.ConcurrentLinkedQueue()
 @Field static java.util.concurrent.Semaphore mutex = new java.util.concurrent.Semaphore(1)
 @Field static java.util.concurrent.Semaphore mutexSendCommand = new java.util.concurrent.Semaphore(1)
-@Field static String socketState = ""
+@Field static String socketState = "closed"
 @Field static long lastLockQuery = 0
 @Field static int queueSize = 0
 @Field static int socketErrors = 0
@@ -1588,7 +1588,7 @@ def get_seq(seq) { // could be improuved
         value = random.nextInt(89) + 10
         sequence += value.toString()
     }
-    //sequence = "64951454" // to remove rfg
+    sequence = "64951454" // to remove rfg
     log_debug("sequencial number = ${sequence}")
     return sequence
 }
@@ -1606,15 +1606,20 @@ def count_data_frame(data) {
 
 def data_read_request(String... arg) { // command,unit_id,data_app
     log_debug("data_read_request - arg is ${arg}")
-    if(arg[0] == null) {
-        log_error("data_write_request - command invalid!")
+    if(arg.size() != 3) {
+        log_error("data_read_request - arg size is invalid! size: ${arg.size()}")
+        return
+    } else if(arg[0] == null) {
+        log_error("data_read_request - command invalid!")
+        return
     } else if (arg[1] == null) {
-        log_error("data_write_request - deviceID invalid!")
+        log_error("data_read_request - deviceID invalid!")
+        return
     } else if (arg[2] == null) {
-        log_error("data_write_request - data_app invalid!")
-    } else if (arg[3] == null) {
-        log_error("data_write_request - data invalid!")
+        log_error("data_read_request - data_app invalid!")
+        return
     }
+    
     def head = "5500"
 //    data_command = arg[0]
     def data_seq = get_seq(seq)
@@ -1635,14 +1640,21 @@ def data_read_request(String... arg) { // command,unit_id,data_app
 
 def data_report_request(String... arg) { // data = size+time or size+temperature (command,unit_id,data_app,data)
     log_debug("data_report_request - arg is ${arg}")
-    if(arg[0] == null) {
-        log_error("data_write_request - command invalid!")
+    if(arg.size() != 4) {
+        log_error("data_report_request - arg size is invalid! size: ${arg.size()}")
+        return
+    } else if(arg[0] == null) {
+        log_error("data_report_request - command invalid!")
+        return
     } else if (arg[1] == null) {
-        log_error("data_write_request - deviceID invalid!")
+        log_error("data_report_request - deviceID invalid!")
+        return
     } else if (arg[2] == null) {
-        log_error("data_write_request - data_app invalid!")
+        log_error("data_report_request - data_app invalid!")
+        return
     } else if (arg[3] == null) {
-        log_error("data_write_request - data invalid!")
+        log_error("data_report_request - data invalid!")
+        return
     }
 
     def head = "5500"
@@ -1666,14 +1678,21 @@ def data_report_request(String... arg) { // data = size+time or size+temperature
 
 def data_write_request(String... arg) { // data = size+data to send (command,unit_id,data_app,data)
     log_debug("data_write_request - arg is ${arg}")
-    if(arg[0] == null) {
+    if(arg.size() != 4) {
+        log_error("data_write_request - arg size is invalid! size: ${arg.size()}")
+        return
+    } else if(arg[0] == null) {
         log_error("data_write_request - command invalid!")
+        return
     } else if (arg[1] == null) {
         log_error("data_write_request - deviceID invalid!")
+        return
     } else if (arg[2] == null) {
         log_error("data_write_request - data_app invalid!")
+        return
     } else if (arg[3] == null) {
         log_error("data_write_request - data invalid!")
+        return
     }
     
     def head = "5500"
