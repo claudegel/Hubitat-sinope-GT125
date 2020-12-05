@@ -1,0 +1,17 @@
+{
+  "author": "Rangner FG",
+  "gitHubUrl": "https://github.com/claudegel/Hubitat-sinope-GT125",
+  "payPalUrl": "https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=GNAVZ94NC3FQL&currency_code=CAD",
+  "packages": [
+    {
+      "id": "c543f3ef-626a-4ee3-aff3-af61cab4a8d0",
+      "name": "Sinope Neviweb Hub GT125",
+      "category": "Integrations",
+      "location": "https://raw.githubusercontent.com/claudegel/Hubitat-sinope-GT125/main/packageManifest.json",
+      "description": "Added integration for Sinope Neviweb Hub GT125",
+      "tags": [
+        "Climate Control"
+      ]
+    }
+  ]
+}
