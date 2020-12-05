@@ -1,0 +1,23 @@
+{
+  "packageName": "Sinope Neviweb Hub GT125",
+  "author": "Rangner FG",
+  "version": "1.1",
+  "minimumHEVersion": "2.1.9",
+  "dateReleased": "2019-12-04",
+  "drivers": [
+    {
+      "id": "192b25d5-3d1a-4de6-a30a-a28e964f0e33",
+      "name": "Sinope Neviweb Hub",
+      "namespace": "rferrazguimaraes",
+      "location": "https://raw.githubusercontent.com/claudegel/Hubitat-sinope-GT125/main/drivers/sinope-neviweb-hub-parent.groovy",
+      "required": true
+    },
+    {
+      "id": "e060786e-9405-40c7-9344-25ac8cb2d22e",
+      "name": "Sinope Thermostat",
+      "namespace": "rferrazguimaraes",
+      "location": "https://raw.githubusercontent.com/claudegel/Hubitat-sinope-GT125/main/drivers/sinope-thermostat-child.groovy",
+      "required": true
+    }
+  ]
+}
