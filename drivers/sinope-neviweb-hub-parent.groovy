@@ -432,8 +432,6 @@ def get_light_idle(data) {
 }
 
 def set_light_idle(level) { // 0 to 100
-    def test = "01" + byteArrayToHexString(packInt(level)[0..0] as byte[])
-    log_debug("set_light_idle test: ${test}")
     return "01" + byteArrayToHexString(packInt(level)[0..0] as byte[])
 }
 
@@ -452,9 +450,7 @@ def set_backlight_state(String dni, state) {
 def set_backlight_idle(String dni, level) {
     // Set backlight intensity when idle, 0 off to 100 full
     try {
-        log_debug("set_backlight_idle level: ${level}")
         def deviceID = getDeviceIDfromDNI(dni)
-        //set_backlight_state(dni, 0)
         sendRequest(self, data_write_request(data_write_command, deviceID, data_backlight_idle, set_light_idle(level)))
     }
     catch (e)
@@ -1265,11 +1261,6 @@ def runAllActions()
 
                     if(paramsMap != null)
                     {
-                        if(commandQueue.size() < queueSize && queueSize != (commandQueue.size() + 1))
-                        {
-                            log_error("poolCommand queueSize is different - queueSize: ${queueSize} - commandSize: ${commandQueue.size()}")
-                        }        
-
                         device.updateDataValue("type", paramsMap.type)
 
                         if(paramsMap.type == "getAPIKey")
@@ -1302,10 +1293,16 @@ def runAllActions()
             }
         }
 
+        if(commandQueue.size() < queueSize && queueSize != (commandQueue.size() + 1))
+        {
+            log_error("poolCommand queueSize is different - queueSize: ${queueSize} - commandSize: ${commandQueue.size()}")
+        }        
+        
         if(commandQueue.size() > 0)
         {
             log_debug("Setting queueSize: ${commandQueue.size()}")
         }
+        
         queueSize = commandQueue.size()
 
         def duration = (pollIntervals.toInteger() ?: 60) * 1000
