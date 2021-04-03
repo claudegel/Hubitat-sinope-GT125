@@ -16,6 +16,7 @@
  *  Date: 2020-11-22
  *  Version: 1.0 - Initial commit
  *  Version: 1.1 - Fixed thread issues + added options to thermostat
+ *  Version: 1.2 - Fixed zero length response introduced by firmware 2.2.6
  */
 
 import groovy.transform.Field
@@ -123,6 +124,8 @@ import hubitat.device.Protocol
 @Field static int queueSize = 0
 @Field static int socketErrors = 0
 
+def driverVer() { return "1.2" }
+
 metadata {
     definition(name: "Sinope Neviweb Hub", namespace: "rferrazguimaraes", author: "Rangner Ferraz Guimaraes") {
         capability "Refresh"
@@ -179,6 +182,7 @@ def updated() {
 
 def configure() {    
     log_warn("configure...")
+    updateDataValue("driverVersion", driverVer())
     resetPoolCommand()
     unschedule()
     schedule("0/1 * * * * ?", runAllActions1Sec)
@@ -793,18 +797,24 @@ def get_result(data) { // check if data write was successfull, return True or Fa
 // This function receives the response from the Sinope Hub bridge and updates things, or passes the response to an individual thermostat
 def parse(response) {
     log_debug("parse Response is ${response} and size is ${hexStringToByteArray(response).size()}")
-    def resp = response
-    if (resp.length() == 1024)
+    
+    def respLength = response.length()
+    if(respLength == null || respLength == 0)
+    {
+        return
+    }
+    
+    if (respLength == 1024)
     {
         // Length is max so concatenate together
         def concatStr = getDataValue("fullMessage")
         if (concatStr == null)
         {
-		    concatStr = resp
+		    concatStr = response
         }
         else
         {
-            concatStr = concatStr + resp
+            concatStr = concatStr + response
         }
         device.updateDataValue("fullMessage", concatStr)
     }
@@ -814,11 +824,11 @@ def parse(response) {
 		def concatStr = getDataValue("fullMessage")
         if (concatStr == null)
         {
-		    concatStr = resp
+		    concatStr = response
         }
         else
         {
-            concatStr = concatStr + resp
+            concatStr = concatStr + response
             device.updateDataValue("fullMessage", "")
         }
 		processResponse(concatStr)
