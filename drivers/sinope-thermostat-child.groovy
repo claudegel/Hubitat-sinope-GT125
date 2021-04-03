@@ -16,6 +16,7 @@
  *  Date: 2020-11-22
  *  Version: 1.0 - Initial commit
  *  Version: 1.1 - Fixed thread issues + added options to thermostat
+ *  Version: 1.2 - Added support to fahrenheit
  */
 
 /*
@@ -40,6 +41,10 @@ import groovy.transform.Field
 @Field final int SINOPE_BYPASS_FLAG = 128
 @Field final List SINOPE_BYPASSABLE_MODES = [MODE.SINOPE_MODE_FREEZE_PROTECT, MODE.SINOPE_MODE_AUTO, MODE.SINOPE_MODE_AWAY]
 @Field final List SINOPE_MODE_AUTO_BYPASS = [MODE.SINOPE_MODE_AUTO, MODE.SINOPE_BYPASS_FLAG]
+@Field final float SINOPE_MIN_TEMPERATURE_CELSIUS = 5.0
+@Field final float SINOPE_MAX_TEMPERATURE_CELSIUS = 30.0
+@Field final float SINOPE_MIN_TEMPERATURE_FAHRENHEIT = 41.0
+@Field final float SINOPE_MAX_TEMPERATURE_FAHRENHEIT = 86.0
 
 @Field final String PRESET_BYPASS = 'temporary'
 @Field final List PRESET_MODES = ["PRESET_NONE", "PRESET_AWAY", "PRESET_BYPASS"]
@@ -53,7 +58,10 @@ import groovy.transform.Field
 @Field final Map backlightOptions = [0:"Automatic", 100:"Always On"]
 @Field final Map earlyStartOptions = [0:"Disabled", 1:"Enabled"]
 @Field final Map keypadOptions = [0:"Unlocked", 1:"Locked"]
-@Field final Map temperatureSetPointOptions = [5.0:"5.0 C", 5.5:"5.5 C", 6.0:"6.0 C", 6.5:"6.5 C", 7.0:"7.0 C", 7.5:"7.5 C", 8.0:"8.0 C", 8.5:"8.5 C", 9:"9.0 C", 9.5:"9.5 C", 10.0:"10.0 C", 10.5:"10.5 C", 11.0:"11.0 C", 11.5:"11.5 C", 12.0:"12.0 C", 12.5:"12.5 C", 13.0:"13.0 C", 13.5:"13.5 C", 14.0:"14.0 C", 14.5:"14.5 C", 15.0:"15.0 C", 15.5:"15.5 C", 16.0:"16.0 C", 16.5:"16.5 C", 17.0:"17.0 C", 17.5:"17.5 C", 18.0:"18.0 C", 18.5:"18.5 C", 19.0:"19.0 C", 19.5:"19.5 C", 20.0:"20.0 C", 20.5:"20.5 C", 21.0:"21.0 C", 21.5:"21.5 C", 22.0:"22.0 C", 22.5:"22.5 C", 23.0:"23.0 C", 23.5:"23.5 C", 24.0:"24.0 C", 24.5:"24.5 C", 25.0:"25.0 C", 25.5:"25.5 C", 26.0:"26.0 C", 26.5:"26.5 C", 27.0:"27.0 C", 27.5:"27.5 C", 28.0:"28.0 C", 28.5:"28.5 C", 29.0:"29.0 C", 29.5:"29.5 C", 30.0:"30.0 C"]
+@Field final Map temperatureSetPointsCelsius = [5.0:"5.0 C", 5.5:"5.5 C", 6.0:"6.0 C", 6.5:"6.5 C", 7.0:"7.0 C", 7.5:"7.5 C", 8.0:"8.0 C", 8.5:"8.5 C", 9:"9.0 C", 9.5:"9.5 C", 10.0:"10.0 C", 10.5:"10.5 C", 11.0:"11.0 C", 11.5:"11.5 C", 12.0:"12.0 C", 12.5:"12.5 C", 13.0:"13.0 C", 13.5:"13.5 C", 14.0:"14.0 C", 14.5:"14.5 C", 15.0:"15.0 C", 15.5:"15.5 C", 16.0:"16.0 C", 16.5:"16.5 C", 17.0:"17.0 C", 17.5:"17.5 C", 18.0:"18.0 C", 18.5:"18.5 C", 19.0:"19.0 C", 19.5:"19.5 C", 20.0:"20.0 C", 20.5:"20.5 C", 21.0:"21.0 C", 21.5:"21.5 C", 22.0:"22.0 C", 22.5:"22.5 C", 23.0:"23.0 C", 23.5:"23.5 C", 24.0:"24.0 C", 24.5:"24.5 C", 25.0:"25.0 C", 25.5:"25.5 C", 26.0:"26.0 C", 26.5:"26.5 C", 27.0:"27.0 C", 27.5:"27.5 C", 28.0:"28.0 C", 28.5:"28.5 C", 29.0:"29.0 C", 29.5:"29.5 C", 30.0:"30.0 C"]
+@Field final Map temperatureSetPointsFarenheit = [41.0:"41 F", 42.0:"42 F", 43.0:"43 F", 44.0:"44 F", 45.0:"45 F", 46.0:"46 F", 47.0:"47 F", 48.0:"48 F", 49.0:"49 F", 50.0:"50 F", 51.0:"51 F", 52.0:"52 F", 53.0:"53 F", 54.0:"54 F", 55.0:"55 F", 56.0:"56 F", 57.0:"57 F", 58.0:"58 F", 59.0:"59 F", 60.0:"60 F", 61.0:"61 F", 62.0:"62 F", 63.0:"63 F", 64.0:"64 F", 65.0:"65 F", 66.0:"66 F", 67.0:"67 F", 68.0:"68 F", 69.0:"69 F", 70.0:"70 F", 71.0:"71 F", 72.0:"72 F", 73.0:"73 F", 74.0:"74 F", 75.0:"75 F", 76.0:"76 F", 77.0:"77 F", 78.0:"78 F", 79.0:"79 F", 80.0:"80 F", 81.0:"81 F", 82.0:"82 F", 83.0:"83 F", 84.0:"84 F", 85.0:"85 F", 86.0:"86 F"]
+
+def driverVer() { return "1.2" }
 
 metadata {
 	definition (name: "Sinope Thermostat", namespace: "rferrazguimaraes", author: "Rangner Ferraz Guimaraes")
@@ -68,7 +76,7 @@ metadata {
         
 		attribute "outdoorTemp", "string"
 		attribute "heatLevel", "number"
-        attribute "targetTemp", "number"
+        attribute "targetTemperature", "number"
         attribute "currMode", "string"
         attribute "statusText", "string"
         
@@ -84,10 +92,9 @@ metadata {
         input name: "prefDisplayBacklight", type: "enum", title: "Backlight", options: backlightOptions, defaultValue: "0", required: true
         input name: "prefDisplayEarlyStart", type: "enum", title: "Early Start", options: earlyStartOptions, defaultValue: "0", required: true
         input name: "prefDisplayKeypad", type: "enum", title: "Keypad", options: keypadOptions, defaultValue: "0", required: true
-        input name: "prefMinSetPoint", type: "enum", title: "Min. Setpoint", options: temperatureSetPointOptions, defaultValue: "5.0", required: true
-        input name: "prefMaxSetPoint", type: "enum", title: "Max. Setpoint", options: temperatureSetPointOptions, defaultValue: "30.0", required: true
-        input name: "prefAwaySetPoint", type: "enum", title: "Away Setpoint", options: temperatureSetPointOptions, defaultValue: "5.0", required: true
-        //input name: "wakeUpIntervalInMins", "number", title: "Wake Up Interval (min). Default 5mins.", description: "Wakes up and send\receives new temperature setting", range: "1..30", displayDuringSetup: true
+        input name: "prefMinSetPoint", type: "enum", title: "Min. Setpoint", options: isCelsius() ? temperatureSetPointsCelsius : temperatureSetPointsFarenheit, defaultValue: isCelsius() ? "5.0" : "41.0", required: true
+        input name: "prefMaxSetPoint", type: "enum", title: "Max. Setpoint", options: isCelsius() ? temperatureSetPointsCelsius : temperatureSetPointsFarenheit, defaultValue: isCelsius() ? "30.0" : "86.0", required: true
+        input name: "prefAwaySetPoint", type: "enum", title: "Away Setpoint", options: isCelsius() ? temperatureSetPointsCelsius : temperatureSetPointsFarenheit, defaultValue: isCelsius() ? "5.0" : "41.0", required: true
         input("logDebug", "bool", title: "Enable debug logging", defaultValue: false)
     	input("logWarn", "bool", title: "Enable warn logging", defaultValue: false)
     	input("logError", "bool", title: "Enable error logging", defaultValue: false)
@@ -100,12 +107,13 @@ def installed() {
 	sendEvent(name: "thermostatMode", value: "off", isStateChange: true)
 	sendEvent(name: "thermostatFanMode", value: "auto", isStateChange: true)
 	sendEvent(name: "thermostatOperatingState", value: "idle", isStateChange: true)
-	sendEvent(name: "thermostatSetpoint", value: 18, isStateChange: true)
-	sendEvent(name: "heatingSetpoint", value: 18, isStateChange: true)
-	sendEvent(name: "coolingSetpoint", value: 30, isStateChange: true)
-    sendEvent(name: "temperature", value: 20, isStateChange: true)
-    sendEvent(name: "targetTemp", value: 20, isStateChange: true)
+	sendEvent(name: "thermostatSetpoint", value: FormatTemperature(18, isFahrenheit()), isStateChange: true)
+	sendEvent(name: "heatingSetpoint", value: FormatTemperature(18, isFahrenheit()), isStateChange: true)
+	sendEvent(name: "coolingSetpoint", value: FormatTemperature(getMaxTemperature(), isFahrenheit()), isStateChange: true)
+    sendEvent(name: "temperature", value: FormatTemperature(20, isFahrenheit()), isStateChange: true)
+    sendEvent(name: "targetTemperature", value: FormatTemperature(20, isFahrenheit()), isStateChange: true)
     updateDataValue("lastRunningMode", "heat")
+    updateDataValue("driverVersion", driverVer())
     configure()
 }
 
@@ -116,7 +124,6 @@ def initialize() {
 
 def configure() {    
     log.warn "configure()"
-
     unschedule()
     poll()
 }
@@ -136,9 +143,9 @@ def parameterSetting() {
     parent.set_early_start(device.deviceNetworkId, prefDisplayEarlyStart.toInteger() ?: 0)
     parent.set_backlight_idle(device.deviceNetworkId, prefDisplayBacklight.toInteger() ?: 0)
     parent.set_keyboard_lock(device.deviceNetworkId, prefDisplayKeypad.toInteger() ?: 0)
-    parent.set_min_setpoint(device.deviceNetworkId, FormatTemp(prefMinSetPoint ?: 5.0))
-    parent.set_max_setpoint(device.deviceNetworkId, FormatTemp(prefMaxSetPoint ?: 30.0))
-    parent.set_away_setpoint(device.deviceNetworkId, FormatTemp(prefAwaySetPoint ?: 5.0))
+    parent.set_min_setpoint(device.deviceNetworkId, FormatTemperature(prefMinSetPoint ?: getMinTemperature(), true))
+    parent.set_max_setpoint(device.deviceNetworkId, FormatTemperature(prefMaxSetPoint ?: getMaxTemperature(), true))
+    parent.set_away_setpoint(device.deviceNetworkId, FormatTemperature(prefAwaySetPoint ?: getMinTemperature(), true))
 }
 
 def refresh() {
@@ -158,6 +165,7 @@ def refreshInfo()
 {
     //Get the latest data from Sinope and update the state.
 	//Actually get a refresh from the parent/NeviwebHub
+    updateDataValue("driverVersion", driverVer())
     log_debug("Refreshing thermostat data from parent")
     parent.childRequestingRefresh(device.deviceNetworkId)
 }
@@ -165,50 +173,31 @@ def refreshInfo()
 def tempUp() {
     log.debug("tempUp()")
     
-    def targetTemp = device.currentValue("targetTemp")
-    if (targetTemp != null) {
-        switch (location?.getTemperatureScale()) {
-            case "C":
-            targetTemp = FormatTemp(targetTemp + 0.5)
-            if (targetTemp <= 5) {
-                targetTemp = 5
-            }      
-            break;
-
-            default:
-            targetTemp = FormatTemp(targetTemp + 1)
-            if (targetTemp <= 41) {
-                targetTemp = 41
-            }  
-            break;
+    def targetTemperature = device.currentValue("targetTemperature")
+    if (targetTemperature != null) {
+        
+        def increment = 0.5
+        if(isFahrenheit()) {
+            increment = 1.0
         }
         
-        updateEvents(temperature: targetTemp, updateDevice: true)
+        targetTemperature = FormatTemperature(targetTemperature + increment)
+        updateEvents(temperature: targetTemperature, updateDevice: true)
     }
 }
 
 def tempDown() {
     log_debug("tempDown()")
     
-    def targetTemp = device.currentValue("targetTemp")
-    if (targetTemp != null) {
-        switch (location?.getTemperatureScale()) {
-            case "C":
-            targetTemp = FormatTemp(targetTemp - 0.5)
-            if (targetTemp <= 5) {
-                targetTemp = 5
-            }      
-            break;
-
-            default:
-            targetTemp = FormatTemp(targetTemp - 1)
-            if (targetTemp <= 41) {
-                targetTemp = 41
-            }  
-            break;
+    def targetTemperature = device.currentValue("targetTemperature")
+    if (targetTemperature != null) {
+        def decrement = 0.5
+        if(isFahrenheit()) {
+            decrement = 1.0
         }
         
-        updateEvents(temperature: targetTemp, updateDevice: true)
+        targetTemperature = FormatTemperature(targetTemperature - decrement)        
+        updateEvents(temperature: targetTemperature, updateDevice: true)
     }
 }
 
@@ -306,18 +295,19 @@ def off() {
 def processChildResponse(response)
 {
     def isRead = response.updateType == "read"
+    
 	//Response received from Neviweb Hub so process it (mainly used for refresh, but could also process the success/fail messages)
     log_debug("received processChildResponse response: ${response}")
     switch(response.type) {
         case "temperature":
-            def temp = FormatTemp(response.value)
-            sendEvent(name: "temperature", value: temp)
-            //log_debug("received processChildResponse temperature: ${temp}")        
+            def temperature = FormatTemperature(response.value, isFahrenheit())
+            sendEvent(name: "temperature", value: temperature)
+            log_debug("received processChildResponse temperature: ${temperature}")        
             break
         case "set_point":
-            def temp = FormatTemp(response.value)
-            updateEvents(temperature: temp, updateDevice: false)
-            //log_debug("received processChildResponse setPoint: ${temp}")
+            def temperature = FormatTemperature(response.value, isFahrenheit())
+            updateEvents(temperature: temperature, updateDevice: false)
+            log_debug("received processChildResponse setPoint: ${temperature}")
             break
         case "heat_level":
 			sendEvent(name: "heatLevel", value: response.value)
@@ -333,14 +323,14 @@ def processChildResponse(response)
             log_debug("received processChildResponse away: ${response.value}")
             break
         case "max_temp":
-            def temp = FormatTemp(response.value, false)
-            sendEvent(name: "maximumTemperature", value: temp)
-            log_debug("received processChildResponse tempmax: ${temp}")
+            def temperature = FormatTemperature(response.value, isFahrenheit())
+            sendEvent(name: "maximumTemperature", value: temperature)
+            log_debug("received processChildResponse tempmax: ${temperature}")
             break
         case "min_temp":
-            def temp = FormatTemp(response.value, false)
-            sendEvent(name: "minimumTemperature", value: temp)
-            log_debug("received processChildResponse tempmin: ${temp}")
+            def temperature = FormatTemperature(response.value, isFahrenheit())
+            sendEvent(name: "minimumTemperature", value: temperature)
+            log_debug("received processChildResponse tempmin: ${temperature}")
             break        
         case "load":
             sendEvent(name: "load", value: response.value)
@@ -391,8 +381,9 @@ def processChildResponse(response)
             log_debug("received processChildResponse early_start: ${earlyStartOptions.get(response.value)}")
             break
         case "away_temp":
-            sendEvent(name: "awayTemperature", value: response.value)
-            log_debug("received processChildResponse awayTemperature: ${response.value}")
+            def temperature = FormatTemperature(response.value, isFahrenheit())
+            sendEvent(name: "awayTemperature", value: temperature)
+            log_debug("received processChildResponse awayTemperature: ${temperature}")
             break
         case "backlight_state":
             sendEvent(name: "backLightState", value: response.value)
@@ -412,7 +403,7 @@ private updateEvents(Map args){
     log_debug("Executing 'updateEvents' with mode: ${args.mode}, temperature: ${args.temperature} and updateDevice: ${args.updateDevice}")
     // Get args with default values
     def mode = args.get("mode", null)
-    def temperature = FormatTemp(args.get("temperature", null))
+    def temperature = FormatTemperature(args.get("temperature", null))
     def updateDevice = args.get("updateDevice", false)
     Boolean turnOff = mode == "off"
     def events = []
@@ -430,20 +421,23 @@ private updateEvents(Map args){
     }
     
     if (!temperature){
-        temperature = FormatTemp(device.currentValue("targetTemp"))
+        log_debug("Temperature not found, using targetTemperature: ${device.currentValue("targetTemperature")}")
+        temperature = FormatTemperature(device.currentValue("targetTemperature"))
     }
+    
+   	events.add(sendEvent(name: "coolingSetpoint", value: FormatTemperature(getMaxTemperature()), isStateChange: true)) // as SINOPE doesn't control cooling, just update with a dummy value
     
     switch(mode) {
         case "fan":
             events.add(sendEvent(name: "statusText", value: "Fan Mode", displayed: false))
             events.add(sendEvent(name: "thermostatOperatingState", value: "fan only", displayed: false, isStateChange: true))
-            events.add(sendEvent(name: "targetTemp", value: null))
+            events.add(sendEvent(name: "targetTemperature", value: temperature))
             updateDataValue("lastRunningMode", "auto")
             break
         case "dry":
             events.add(sendEvent(name: "statusText", value: "Dry Mode", displayed: false))
             events.add(sendEvent(name: "thermostatOperatingState", value: "fan only", displayed: false, isStateChange: true))
-            events.add(sendEvent(name: "targetTemp", value: null))
+            events.add(sendEvent(name: "targetTemperature", value: temperature))
             updateDataValue("lastRunningMode", "auto")
             break
         case "heat":
@@ -451,7 +445,7 @@ private updateEvents(Map args){
             //events.add(sendEvent(name: "thermostatOperatingState", value: "heating", displayed: false, isStateChange: true))
             events.add(sendEvent(name: "heatingSetpoint", value: temperature, displayed: false, isStateChange: true))
             events.add(sendEvent(name: "thermostatSetpoint", value: temperature, displayed: false, isStateChange: true))
-            events.add(sendEvent(name: "targetTemp", value: temperature))
+            events.add(sendEvent(name: "targetTemperature", value: temperature))
             updateDataValue("lastRunningMode", "heat")
             break
         case "cool":
@@ -459,12 +453,12 @@ private updateEvents(Map args){
             events.add(sendEvent(name: "thermostatOperatingState", value: "cooling", displayed: false, isStateChange: true))
             events.add(sendEvent(name: "coolingSetpoint", value: temperature, displayed: false, isStateChange: true))
             events.add(sendEvent(name: "thermostatSetpoint", value: temperature, displayed: false, isStateChange: true))
-            events.add(sendEvent(name: "targetTemp", value: temperature))
+            events.add(sendEvent(name: "targetTemperature", value: temperature))
             updateDataValue("lastRunningMode", "cool")
             break
         case "auto":
             events.add(sendEvent(name: "statusText", value: "Auto Mode: ${temperature}°", displayed: false))
-            events.add(sendEvent(name: "targetTemp", value: temperature))
+            events.add(sendEvent(name: "targetTemperature", value: temperature))
             updateDataValue("lastRunningMode", "auto")
             break
         case "off":
@@ -484,7 +478,9 @@ private updateEvents(Map args){
 private updateDevice(temperature, mode, turnOff) {
     log_debug("updateDevice with temperature: ${temperature}, mode: ${mode} and turnOff: ${turnOff}")
     if(temperature != null) {
-        parent.childSetTemp(device.deviceNetworkId, temperature)
+        float temp = FormatTemperature(temperature, isFahrenheit())
+        log_debug("updateDevice real temperature: ${temp}")
+        parent.childSetTemp(device.deviceNetworkId, temp)
     }
     
     if(mode != null) {
@@ -587,48 +583,93 @@ private minsToHoursMins(Integer intMins) {
     return hoursMins
 }
 
-def FormatTemp(temp, invert = false) {
-	if (temp != null) {
+def FormatTemperature(temperature, invert = false) {
+    def temperatureFormat = prefDisplayTemperatureFormat    
+    def formattedTemperature
+	if (temperature != null) {
+    	float temperatureFloat = Float.parseFloat(temperature+"")
+        if(invert)
+        {
+            if(temperatureFloat > SINOPE_MAX_TEMPERATURE_CELSIUS)
+            {
+                temperatureFormat = "0" // to celsius
+            }
+            else
+            {
+                temperatureFormat = "1" // to fahrenheit
+            }
+        }
+        
 		if(invert) {
-			float i = Float.parseFloat(temp+"")
-			switch (location?.getTemperatureScale()) {
-				case "C":
-					return roundToHalf(i)
-				break;
+			switch (temperatureFormat) {
+				case "0": // fahrenheit to celsius
+					formattedTemperature = roundToHalf(fahrenheitToCelsius(temperatureFloat))
+                    temperatureFormat = "0"
+				break
 
-				case "F":
-					return roundToHalf((Math.round(fToC(i))).toDouble())
-				break;
+                case "1": // celsius to fahrenheit
+					formattedTemperature = (Math.round(celsiusToFahrenheit(temperatureFloat))).toDouble().round(0)
+                    temperatureFormat = "1"
+				break
 			}
 		} else {
-			float i = Float.parseFloat(temp+"")
-			switch (location?.getTemperatureScale()) {
-				case "C":
-					return roundToHalf(i)
-				break;
+			switch (temperatureFormat) {
+				case "0": // celsius
+					formattedTemperature = roundToHalf(temperatureFloat)
+				break
 
-				case "F":
-					return (Math.round(cToF(i))).toDouble().round(0)
-				break;
+				case "1": // fahrenheit
+					formattedTemperature = (Math.round(temperatureFloat)).toDouble().round(0)
+				break
 			}
 		}
     } else {
     	return null
     }
+    
+    switch (temperatureFormat) {
+        case "0": // celsius
+            formattedTemperature = Math.min(SINOPE_MAX_TEMPERATURE_CELSIUS, Math.max(SINOPE_MIN_TEMPERATURE_CELSIUS, formattedTemperature))
+        break
+
+        case "1": // fahrenheit
+            formattedTemperature = Math.min(SINOPE_MAX_TEMPERATURE_FAHRENHEIT, Math.max(SINOPE_MIN_TEMPERATURE_FAHRENHEIT, formattedTemperature))
+        break
+    }
+    
+    return formattedTemperature
 }
 
-def float roundToHalf(float x) {
-    return (float) (Math.ceil(x * 2) / 2);
+float roundToHalf(float x) {
+    return (float) (Math.round(x * 2) / 2);
 }
 
-def cToF(temp) {
-	return ((( 9 * temp ) / 5 ) + 32)
-	log.info "celsius -> fahrenheit"
+boolean isCelsius()
+{
+    return prefDisplayTemperatureFormat == "0"
 }
 
-def fToC(temp) {
-	return ((( temp - 32 ) * 5 ) / 9)
-	log.info "fahrenheit -> celsius"
+boolean isFahrenheit()
+{
+    return !isCelsius()
+}
+
+float getMaxTemperature()
+{
+    if(isFahrenheit()) {
+        return SINOPE_MAX_TEMPERATURE_FAHRENHEIT
+    } else {
+        return SINOPE_MAX_TEMPERATURE_CELSIUS
+    }
+}
+
+float getMinTemperature()
+{
+    if(isFahrenheit()) {
+        return SINOPE_MIN_TEMPERATURE_FAHRENHEIT
+    } else {
+        return SINOPE_MIN_TEMPERATURE_CELSIUS
+    }
 }
 
 def log_debug(logData)
