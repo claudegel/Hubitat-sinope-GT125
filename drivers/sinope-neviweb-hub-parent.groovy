@@ -1442,6 +1442,11 @@ def makeRequest(type, data)
 }
 
 def getAPIKey() {
+    if (sinopehubid != /^[0-9A-Fa-f]{16}$/)
+    {
+        log_error("Neviweb Hub ID is invalid. 16 HEX characters, no spaces.")
+    }
+
     sendCommand(makeRequest("getAPIKey", byteArrayToHexString(key_request(invert(sinopehubid)))))
 }
 
