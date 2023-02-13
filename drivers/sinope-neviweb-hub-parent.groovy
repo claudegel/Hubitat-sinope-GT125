@@ -125,7 +125,7 @@ import hubitat.device.Protocol
 @Field static int queueSize = 0
 @Field static int socketErrors = 0
 
-def driverVer() { return "1.2" }
+def driverVer() { return "1.3" }
 
 metadata {
     definition(name: "Sinope Neviweb Hub", namespace: "rferrazguimaraes", author: "Rangner Ferraz Guimaraes") {
