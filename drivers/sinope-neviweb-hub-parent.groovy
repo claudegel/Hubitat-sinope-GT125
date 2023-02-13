@@ -186,7 +186,7 @@ def configure() {
     updateDataValue("driverVersion", driverVer())
     resetPoolCommand()
     unschedule()
-    schedule("0/2 * * * * ?", runAllActions1Sec)
+    schedule("0/1 * * * * ?", runAllActions1Sec)
     schedule("0 0 3 1/1 * ? *", dailyReport) // at 3:00 AM
 }
 
@@ -1443,6 +1443,11 @@ def makeRequest(type, data)
 }
 
 def getAPIKey() {
+    if (sinopehubid != /^[0-9A-Fa-f]{16}$/)
+    {
+        log_error("Neviweb Hub ID is invalid. 16 HEX characters, no spaces.")
+    }
+    
     sendCommand(makeRequest("getAPIKey", byteArrayToHexString(key_request(invert(sinopehubid)))))
 }
 
