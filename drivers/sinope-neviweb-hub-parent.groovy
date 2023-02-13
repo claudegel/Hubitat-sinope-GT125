@@ -17,6 +17,7 @@
  *  Version: 1.0 - Initial commit
  *  Version: 1.1 - Fixed thread issues + added options to thermostat
  *  Version: 1.2 - Fixed zero length response introduced by firmware 2.2.6
+ *  Version: 1.3 - Fixed how the parameters are set (firmware update broke it)
  */
 
 import groovy.transform.Field
@@ -185,7 +186,7 @@ def configure() {
     updateDataValue("driverVersion", driverVer())
     resetPoolCommand()
     unschedule()
-    schedule("0/1 * * * * ?", runAllActions1Sec)
+    schedule("0/2 * * * * ?", runAllActions1Sec)
     schedule("0 0 3 1/1 * ? *", dailyReport) // at 3:00 AM
 }
 
@@ -596,7 +597,7 @@ def set_early_start(timeFormat) { // 0 = disabled, 1 = enabled
     return "01" + byteArrayToHexString(packInt(timeFormat)[0..0] as byte[])
 }
 
-def set_early_start(String dni, isEnable) {
+def set_early_start(dni, isEnable) {
     // 0 = disabled, 1 = enabled
     try {
         def deviceID = getDeviceIDfromDNI(dni)
@@ -608,7 +609,7 @@ def set_early_start(String dni, isEnable) {
     }
 }
 
-def set_min_setpoint(String dni, float temperature) {
+def set_min_setpoint(dni, temperature) {
     try {
         def deviceID = getDeviceIDfromDNI(dni)
         sendRequest(dni, data_write_request(data_write_command, deviceID, data_min_temp, set_temperature(temperature)))
@@ -619,7 +620,7 @@ def set_min_setpoint(String dni, float temperature) {
     }
 }
 
-def set_max_setpoint(String dni, float temperature) {
+def set_max_setpoint(dni, temperature) {
     try {
         def deviceID = getDeviceIDfromDNI(dni)
         sendRequest(dni, data_write_request(data_write_command, deviceID, data_max_temp, set_temperature(temperature)))
@@ -630,7 +631,7 @@ def set_max_setpoint(String dni, float temperature) {
     }
 }
 
-def set_away_setpoint(String dni, float temperature) {
+def set_away_setpoint(dni, temperature) {
     try {
         def deviceID = getDeviceIDfromDNI(dni)
         sendRequest(dni, data_write_request(data_write_command, deviceID, data_away_temp, set_temperature(temperature)))
@@ -754,7 +755,7 @@ def set_temperature(temp_celcius) {
     return "02" + byteArrayToHexString(packInt(temp)[0..1] as byte[])
 }
 
-def send_time(String dni) {
+def send_time(dni) {
     //Send current time to device. it is required to set device mode to auto
     try {
         def deviceID = getDeviceIDfromDNI(dni)
@@ -765,7 +766,7 @@ def send_time(String dni) {
     }
 }
  
-def set_mode(String dni, device_type, mode) {
+def set_mode(dni, device_type, mode) {
     // Set device operation mode
     // prepare data
     try{
@@ -1442,11 +1443,6 @@ def makeRequest(type, data)
 }
 
 def getAPIKey() {
-    if (sinopehubid != /^[0-9A-Fa-f]{16}$/)
-    {
-        log_error("Neviweb Hub ID is invalid. 16 HEX characters, no spaces.")
-    }
-
     sendCommand(makeRequest("getAPIKey", byteArrayToHexString(key_request(invert(sinopehubid)))))
 }
 
