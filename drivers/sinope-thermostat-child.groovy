@@ -17,6 +17,7 @@
  *  Version: 1.0 - Initial commit
  *  Version: 1.1 - Fixed thread issues + added options to thermostat
  *  Version: 1.2 - Added support to fahrenheit
+ *  Version: 1.3 - Added better log system
  */
 
 /*
@@ -29,6 +30,10 @@ https://www.sinopetech.com/en/support/#api
 */
 
 import groovy.transform.Field
+
+@Field Utils = Utils_create();
+@Field List<String> LOG_LEVELS = ["error", "warn", "info", "debug", "trace"]
+@Field String DEFAULT_LOG_LEVEL = LOG_LEVELS[1]
 
 @Field final Map MODE = [
                          SINOPE_MODE_OFF:   0,
@@ -61,7 +66,7 @@ import groovy.transform.Field
 @Field final Map temperatureSetPointsCelsius = [5.0:"5.0 C", 5.5:"5.5 C", 6.0:"6.0 C", 6.5:"6.5 C", 7.0:"7.0 C", 7.5:"7.5 C", 8.0:"8.0 C", 8.5:"8.5 C", 9:"9.0 C", 9.5:"9.5 C", 10.0:"10.0 C", 10.5:"10.5 C", 11.0:"11.0 C", 11.5:"11.5 C", 12.0:"12.0 C", 12.5:"12.5 C", 13.0:"13.0 C", 13.5:"13.5 C", 14.0:"14.0 C", 14.5:"14.5 C", 15.0:"15.0 C", 15.5:"15.5 C", 16.0:"16.0 C", 16.5:"16.5 C", 17.0:"17.0 C", 17.5:"17.5 C", 18.0:"18.0 C", 18.5:"18.5 C", 19.0:"19.0 C", 19.5:"19.5 C", 20.0:"20.0 C", 20.5:"20.5 C", 21.0:"21.0 C", 21.5:"21.5 C", 22.0:"22.0 C", 22.5:"22.5 C", 23.0:"23.0 C", 23.5:"23.5 C", 24.0:"24.0 C", 24.5:"24.5 C", 25.0:"25.0 C", 25.5:"25.5 C", 26.0:"26.0 C", 26.5:"26.5 C", 27.0:"27.0 C", 27.5:"27.5 C", 28.0:"28.0 C", 28.5:"28.5 C", 29.0:"29.0 C", 29.5:"29.5 C", 30.0:"30.0 C"]
 @Field final Map temperatureSetPointsFarenheit = [41.0:"41 F", 42.0:"42 F", 43.0:"43 F", 44.0:"44 F", 45.0:"45 F", 46.0:"46 F", 47.0:"47 F", 48.0:"48 F", 49.0:"49 F", 50.0:"50 F", 51.0:"51 F", 52.0:"52 F", 53.0:"53 F", 54.0:"54 F", 55.0:"55 F", 56.0:"56 F", 57.0:"57 F", 58.0:"58 F", 59.0:"59 F", 60.0:"60 F", 61.0:"61 F", 62.0:"62 F", 63.0:"63 F", 64.0:"64 F", 65.0:"65 F", 66.0:"66 F", 67.0:"67 F", 68.0:"68 F", 69.0:"69 F", 70.0:"70 F", 71.0:"71 F", 72.0:"72 F", 73.0:"73 F", 74.0:"74 F", 75.0:"75 F", 76.0:"76 F", 77.0:"77 F", 78.0:"78 F", 79.0:"79 F", 80.0:"80 F", 81.0:"81 F", 82.0:"82 F", 83.0:"83 F", 84.0:"84 F", 85.0:"85 F", 86.0:"86 F"]
 
-def driverVer() { return "1.2" }
+def driverVer() { return "1.3" }
 
 metadata {
 	definition (name: "Sinope Thermostat", namespace: "rferrazguimaraes", author: "Rangner Ferraz Guimaraes")
@@ -81,7 +86,7 @@ metadata {
         attribute "statusText", "string"
         
         command "tempUp"
-        command "tempDown"
+        command "tempDown" 
 	}
     
     preferences {
@@ -95,14 +100,12 @@ metadata {
         input name: "prefMinSetPoint", type: "enum", title: "Min. Setpoint", options: isCelsius() ? temperatureSetPointsCelsius : temperatureSetPointsFarenheit, defaultValue: isCelsius() ? "5.0" : "41.0", required: true
         input name: "prefMaxSetPoint", type: "enum", title: "Max. Setpoint", options: isCelsius() ? temperatureSetPointsCelsius : temperatureSetPointsFarenheit, defaultValue: isCelsius() ? "30.0" : "86.0", required: true
         input name: "prefAwaySetPoint", type: "enum", title: "Away Setpoint", options: isCelsius() ? temperatureSetPointsCelsius : temperatureSetPointsFarenheit, defaultValue: isCelsius() ? "5.0" : "41.0", required: true
-        input("logDebug", "bool", title: "Enable debug logging", defaultValue: false)
-    	input("logWarn", "bool", title: "Enable warn logging", defaultValue: false)
-    	input("logError", "bool", title: "Enable error logging", defaultValue: false)
+        input name: "logLevel", title: "Log Level", type: "enum", options: LOG_LEVELS, defaultValue: DEFAULT_LOG_LEVEL, required: true
     }
 }
 
 def installed() {
-    log_debug("installed()")
+    Utils.toLogger("debug", "installed()")
     // Set unused default values (for Google Home Integration)
 	sendEvent(name: "thermostatMode", value: "off", isStateChange: true)
 	sendEvent(name: "thermostatFanMode", value: "auto", isStateChange: true)
@@ -118,7 +121,7 @@ def installed() {
 }
 
 def initialize() {
-    log_debug("initialize()")
+    Utils.toLogger("debug", "initialize()")
     configure()
 }
 
@@ -129,23 +132,23 @@ def configure() {
 }
 
 def updated() {
-    log_debug("updated()")
+    Utils.toLogger("debug", "updated()")
     
     parameterSetting()
     configure()
 }
 
 def parameterSetting() {
-    log_debug("parameterSetting()")
+    Utils.toLogger("debug", "parameterSetting()")
     parent.set_secondary_display(device.deviceNetworkId, prefDisplaySecondary.toInteger() ?: 1)
     parent.set_temperature_format(device.deviceNetworkId, prefDisplayTemperatureFormat.toInteger() ?: 0)
     parent.set_time_format(device.deviceNetworkId, prefDisplayTimeFormat.toInteger() ?: 0)
     parent.set_early_start(device.deviceNetworkId, prefDisplayEarlyStart.toInteger() ?: 0)
     parent.set_backlight_idle(device.deviceNetworkId, prefDisplayBacklight.toInteger() ?: 0)
     parent.set_keyboard_lock(device.deviceNetworkId, prefDisplayKeypad.toInteger() ?: 0)
-    parent.set_min_setpoint(device.deviceNetworkId, FormatTemperature(prefMinSetPoint ?: getMinTemperature(), true))
-    parent.set_max_setpoint(device.deviceNetworkId, FormatTemperature(prefMaxSetPoint ?: getMaxTemperature(), true))
-    parent.set_away_setpoint(device.deviceNetworkId, FormatTemperature(prefAwaySetPoint ?: getMinTemperature(), true))
+    parent.set_min_setpoint(device.deviceNetworkId, FormatTemperature(prefMinSetPoint ?: getMinTemperature(), isFahrenheit()))
+    parent.set_max_setpoint(device.deviceNetworkId, FormatTemperature(prefMaxSetPoint ?: getMaxTemperature(), isFahrenheit()))
+    parent.set_away_setpoint(device.deviceNetworkId, FormatTemperature(prefAwaySetPoint ?: getMinTemperature(), isFahrenheit()))
 }
 
 def refresh() {
@@ -166,12 +169,12 @@ def refreshInfo()
     //Get the latest data from Sinope and update the state.
 	//Actually get a refresh from the parent/NeviwebHub
     updateDataValue("driverVersion", driverVer())
-    log_debug("Refreshing thermostat data from parent")
+    Utils.toLogger("debug", "Refreshing thermostat data from parent")
     parent.childRequestingRefresh(device.deviceNetworkId)
 }
 
 def tempUp() {
-    log.debug("tempUp()")
+    Utils.toLogger("debug", "tempUp()")
     
     def targetTemperature = device.currentValue("targetTemperature")
     if (targetTemperature != null) {
@@ -181,13 +184,13 @@ def tempUp() {
             increment = 1.0
         }
         
-        targetTemperature = FormatTemperature(targetTemperature + increment)
+        targetTemperature = FormatTemperature(targetTemperature + increment, isFahrenheit())
         updateEvents(temperature: targetTemperature, updateDevice: true)
     }
 }
 
 def tempDown() {
-    log_debug("tempDown()")
+    Utils.toLogger("debug", "tempDown()")
     
     def targetTemperature = device.currentValue("targetTemperature")
     if (targetTemperature != null) {
@@ -196,13 +199,13 @@ def tempDown() {
             decrement = 1.0
         }
         
-        targetTemperature = FormatTemperature(targetTemperature - decrement)        
+        targetTemperature = FormatTemperature(targetTemperature - decrement, isFahrenheit())      
         updateEvents(temperature: targetTemperature, updateDevice: true)
     }
 }
 
 def setTemperature(Double value) {
-    log.debug "Executing 'setTemperature' with ${value}"
+    Utils.toLogger("debug", "Executing 'setTemperature' with ${value}")
     updateEvents(temperature: value, updateDevice: true)
 }
 
@@ -212,18 +215,18 @@ def poll() {
     if(pollInterval > 0)
     {
         runIn(pollInterval, 'poll') 
-        log_debug("in poll: (every ${pollInterval} seconds)")
+        Utils.toLogger("debug", "in poll: (every ${pollInterval} seconds)")
         refresh()
     }
 }
 
 def setHeatingSetpoint(Double value) {
-    log_debug("setHeatingSetpoint() newSetpoint: ${value}")
+    Utils.toLogger("debug", "setHeatingSetpoint() newSetpoint: ${value}")
     updateEvents(temperature: value, updateDevice: true)
 }
 
 def setThermostatSetpoint(Double value) {
-    log_debug("setThermostatSetpoint() temperature: ${value}")
+    Utils.toLogger("debug", "setThermostatSetpoint() temperature: ${value}")
     updateEvents(temperature: value, updateDevice: true)
 }
 
@@ -234,17 +237,17 @@ def getTemperatureScale() {
 //Dont use any of these yet as I havent worked out why they would be needed! 
 //Just log that they were triggered for troubleshooting
 def heat() {
-	log_debug("heat()")
+	Utils.toLogger("debug", "heat()")
     def heatPoint = device.currentValue("heatingSetpoint")
     updateEvents(mode: "heat", temperature: heatPoint, updateDevice: true)
 }
 
 def emergencyHeat() {
-	log_debug("emergencyHeat()")
+	Utils.toLogger("debug", "emergencyHeat()")
 }
 
 def setThermostatMode(String newMode) {
-	log_debug("setThermostatMode() - ${newMode}")
+	Utils.toLogger("debug", "setThermostatMode() - ${newMode}")
     def currMode = device.currentValue("thermostatMode")
     if (currMode != newMode){
         updateEvents(mode: newMode, updateDevice: true)
@@ -252,43 +255,43 @@ def setThermostatMode(String newMode) {
 }
 
 def fanOn() {
-	log_debug("fanOn mode is not available for this device")
+	Utils.toLogger("debug", "fanOn mode is not available for this device")
 }
 
 def fanAuto() {
-	log_debug("fanAuto mode is not available for this device")
+	Utils.toLogger("debug", "fanAuto mode is not available for this device")
 }
 
 def fanCirculate() {
-	log_debug("fanCirculate mode is not available for this device")
+	Utils.toLogger("debug", "fanCirculate mode is not available for this device")
 }
 
 def setThermostatFanMode(String value) {
-	log_debug("setThermostatFanMode is not available for this device - ${fanMode}")
+	Utils.toLogger("debug", "setThermostatFanMode is not available for this device - ${fanMode}")
 }
 
 def cool() {
-	log_debug("cool mode is not available for this device")
+	Utils.toLogger("debug", "cool mode is not available for this device")
     //def coolPoint = device.currentValue("coolingSetpoint")
     //updateEvents(mode: "cool", temperature: coolPoint, updateDevice: true)
 }
 
 def setCoolingSetpoint(Double value) {
-	log_debug("setCoolingSetpoint is not available for this device")
+	Utils.toLogger("debug", "setCoolingSetpoint is not available for this device")
     updateEvents(temperature: value, updateDevice: true)
 }
 
 def setSchedule(schedule) {
-    log_debug("setSchedule is not available for this device")
+    Utils.toLogger("debug", "setSchedule is not available for this device")
 }
 
 def auto() {
-	log_debug("emergencyHeat mode is not available for this device. => Defaulting to heat mode instead.")
+	Utils.toLogger("debug", "emergencyHeat mode is not available for this device. => Defaulting to heat mode instead.")
     updateEvents(mode: "auto", updateDevice: true)
 }
 
 def off() {
-	log_debug("off()")
+	Utils.toLogger("debug", "off()")
     updateEvents(mode: "off", updateDevice: true)
 }
 
@@ -302,63 +305,63 @@ def processChildResponse(response)
         case "temperature":
             def temperature = FormatTemperature(response.value, isFahrenheit())
             sendEvent(name: "temperature", value: temperature)
-            log_debug("received processChildResponse temperature: ${temperature}")        
+            Utils.toLogger("debug", "received processChildResponse temperature: ${temperature}")        
             break
         case "set_point":
             def temperature = FormatTemperature(response.value, isFahrenheit())
             updateEvents(temperature: temperature, updateDevice: false)
-            log_debug("received processChildResponse setPoint: ${temperature}")
+            Utils.toLogger("debug", "received processChildResponse setPoint: ${temperature}")
             break
         case "heat_level":
 			sendEvent(name: "heatLevel", value: response.value)
 			sendEvent(name: "thermostatOperatingState", value: ((heatLevel > 10) ? "heating" : "idle"))
-            log_debug("received processChildResponse heatLevel: ${response.value}")
+            Utils.toLogger("debug", "received processChildResponse heatLevel: ${response.value}")
             break
         case "mode":
             updateEvents(mode: ((response.value > 0) ? "heat" : "off"), updateDevice: false)
-            log_debug("received processChildResponse mode: ${response.value}")
+            Utils.toLogger("debug", "received processChildResponse mode: ${response.value}")
             break
         case "away":
             sendEvent(name: "away", value: response.value)
-            log_debug("received processChildResponse away: ${response.value}")
+            Utils.toLogger("debug", "received processChildResponse away: ${response.value}")
             break
         case "max_temp":
             def temperature = FormatTemperature(response.value, isFahrenheit())
             sendEvent(name: "maximumTemperature", value: temperature)
-            log_debug("received processChildResponse tempmax: ${temperature}")
+            Utils.toLogger("debug", "received processChildResponse tempmax: ${temperature}")
             break
         case "min_temp":
             def temperature = FormatTemperature(response.value, isFahrenheit())
             sendEvent(name: "minimumTemperature", value: temperature)
-            log_debug("received processChildResponse tempmin: ${temperature}")
+            Utils.toLogger("debug", "received processChildResponse tempmin: ${temperature}")
             break        
         case "load":
             sendEvent(name: "load", value: response.value)
-            log_debug("received processChildResponse wattload: ${response.value}")
+            Utils.toLogger("debug", "received processChildResponse wattload: ${response.value}")
             break
         case "power_connected":
             sendEvent(name: "power", value: response.value)
-            log_debug("received processChildResponse power: ${response.value}")
+            Utils.toLogger("debug", "received processChildResponse power: ${response.value}")
             break
         case "outdoorTemperature":
             sendEvent(name: "outdoorTemperature", value: response.value)
-            log_debug("received processChildResponse outdoorTemp: ${response.value}")
+            Utils.toLogger("debug", "received processChildResponse outdoorTemp: ${response.value}")
             break
         case "time":
             sendEvent(name: "time", value: response.value)
-            log_debug("received processChildResponse time: ${response.value}")
+            Utils.toLogger("debug", "received processChildResponse time: ${response.value}")
             break
         case "date":
             sendEvent(name: "date", value: response.value)
-            log_debug("received processChildResponse date: ${response.value}")
+            Utils.toLogger("debug", "received processChildResponse date: ${response.value}")
             break
         case "sunrise":
             sendEvent(name: "sunrise", value: response.value)
-            log_debug("received processChildResponse sunrise: ${response.value}")
+            Utils.toLogger("debug", "received processChildResponse sunrise: ${response.value}")
             break
         case "sunset":
             sendEvent(name: "sunset", value: response.value)
-            log_debug("received processChildResponse sunset: ${response.value}")
+            Utils.toLogger("debug", "received processChildResponse sunset: ${response.value}")
             break
         case "lock":
             sendEvent(name: "lock", value: keypadOptions.get(response.value))
@@ -370,37 +373,37 @@ def processChildResponse(response)
             break
         case "temperature_format":
             sendEvent(name: "temperatureFormat", value: temperatureFormatOptions.get(response.value))
-            log_debug("received processChildResponse temperature_format: ${temperatureFormatOptions.get(response.value)}")
+            Utils.toLogger("debug", "received processChildResponse temperature_format: ${temperatureFormatOptions.get(response.value)}")
             break
         case "time_format":
             sendEvent(name: "timeFormat", value: timeFormatOptions.get(response.value))
-            log_debug("received processChildResponse time_format: ${timeFormatOptions.get(response.value)}")
+            Utils.toLogger("debug", "received processChildResponse time_format: ${timeFormatOptions.get(response.value)}")
             break
         case "early_start":
             sendEvent(name: "earlyStart", value: earlyStartOptions.get(response.value))
-            log_debug("received processChildResponse early_start: ${earlyStartOptions.get(response.value)}")
+            Utils.toLogger("debug", "received processChildResponse early_start: ${earlyStartOptions.get(response.value)}")
             break
         case "away_temp":
             def temperature = FormatTemperature(response.value, isFahrenheit())
             sendEvent(name: "awayTemperature", value: temperature)
-            log_debug("received processChildResponse awayTemperature: ${temperature}")
+            Utils.toLogger("debug", "received processChildResponse awayTemperature: ${temperature}")
             break
         case "backlight_state":
             sendEvent(name: "backLightState", value: response.value)
-            log_debug("received processChildResponse backLightState: ${response.value}")
+            Utils.toLogger("debug", "received processChildResponse backLightState: ${response.value}")
             break
         case "backlight_idle":
             sendEvent(name: "backLightIdle", value: response.value)
-            log_debug("received processChildResponse backLightIdle: ${response.value}")
+            Utils.toLogger("debug", "received processChildResponse backLightIdle: ${response.value}")
             break
         default:
-            log_error("processChildResponse - Command ${response.type} not found!")
+            Utils.toLogger("error", "processChildResponse - Command ${response.type} not found!")
             break
     }
 }
 
 private updateEvents(Map args){
-    log_debug("Executing 'updateEvents' with mode: ${args.mode}, temperature: ${args.temperature} and updateDevice: ${args.updateDevice}")
+    Utils.toLogger("debug", "Executing 'updateEvents' with mode: ${args.mode}, temperature: ${args.temperature} and updateDevice: ${args.updateDevice}")
     // Get args with default values
     def mode = args.get("mode", null)
     def temperature = FormatTemperature(args.get("temperature", null))
@@ -409,7 +412,7 @@ private updateEvents(Map args){
     def events = []
 
     if (updateDevice){
-        log_debug("Executing 'updateDevice' with temperature: ${temperature} and turnOff: ${turnOff}")
+        Utils.toLogger("debug", "Executing 'updateDevice' with temperature: ${temperature} and turnOff: ${turnOff}")
         unschedule('updateDevice')
         runIn(2, 'updateDevice', [data:[temperature, mode, turnOff]])
     }
@@ -421,65 +424,64 @@ private updateEvents(Map args){
     }
     
     if (!temperature){
-        log_debug("Temperature not found, using targetTemperature: ${device.currentValue("targetTemperature")}")
+        Utils.toLogger("debug", "Temperature not found, using targetTemperature: ${device.currentValue("targetTemperature")}")
         temperature = FormatTemperature(device.currentValue("targetTemperature"))
     }
     
-   	events.add(sendEvent(name: "coolingSetpoint", value: FormatTemperature(getMaxTemperature()), isStateChange: true)) // as SINOPE doesn't control cooling, just update with a dummy value
+   	sendEvent(name: "coolingSetpoint", value: FormatTemperature(getMaxTemperature()), isStateChange: true) // as SINOPE doesn't control cooling, just update with a dummy value
     
     switch(mode) {
         case "fan":
-            events.add(sendEvent(name: "statusText", value: "Fan Mode", displayed: false))
-            events.add(sendEvent(name: "thermostatOperatingState", value: "fan only", displayed: false, isStateChange: true))
-            events.add(sendEvent(name: "targetTemperature", value: temperature))
+            sendEvent(name: "statusText", value: "Fan Mode", displayed: false)
+            sendEvent(name: "thermostatOperatingState", value: "fan only", displayed: false, isStateChange: true)
+            sendEvent(name: "targetTemperature", value: temperature)
             updateDataValue("lastRunningMode", "auto")
             break
         case "dry":
-            events.add(sendEvent(name: "statusText", value: "Dry Mode", displayed: false))
-            events.add(sendEvent(name: "thermostatOperatingState", value: "fan only", displayed: false, isStateChange: true))
-            events.add(sendEvent(name: "targetTemperature", value: temperature))
+            sendEvent(name: "statusText", value: "Dry Mode", displayed: false)
+            sendEvent(name: "thermostatOperatingState", value: "fan only", displayed: false, isStateChange: true)
+            sendEvent(name: "targetTemperature", value: temperature)
             updateDataValue("lastRunningMode", "auto")
             break
         case "heat":
-            events.add(sendEvent(name: "statusText", value: "Heating to ${temperature}°", displayed: false))
-            //events.add(sendEvent(name: "thermostatOperatingState", value: "heating", displayed: false, isStateChange: true))
-            events.add(sendEvent(name: "heatingSetpoint", value: temperature, displayed: false, isStateChange: true))
-            events.add(sendEvent(name: "thermostatSetpoint", value: temperature, displayed: false, isStateChange: true))
-            events.add(sendEvent(name: "targetTemperature", value: temperature))
+            sendEvent(name: "statusText", value: "Heating to ${temperature}°", displayed: false)
+            sendEvent(name: "heatingSetpoint", value: temperature, displayed: false, isStateChange: true)
+            sendEvent(name: "thermostatSetpoint", value: temperature, displayed: false, isStateChange: true)
+            sendEvent(name: "targetTemperature", value: temperature)
             updateDataValue("lastRunningMode", "heat")
             break
         case "cool":
-            events.add(sendEvent(name: "statusText", value: "Cooling to ${temperature}°", displayed: false))
-            events.add(sendEvent(name: "thermostatOperatingState", value: "cooling", displayed: false, isStateChange: true))
-            events.add(sendEvent(name: "coolingSetpoint", value: temperature, displayed: false, isStateChange: true))
-            events.add(sendEvent(name: "thermostatSetpoint", value: temperature, displayed: false, isStateChange: true))
-            events.add(sendEvent(name: "targetTemperature", value: temperature))
+            sendEvent(name: "statusText", value: "Cooling to ${temperature}°", displayed: false)
+            sendEvent(name: "thermostatOperatingState", value: "cooling", displayed: false, isStateChange: true)
+            sendEvent(name: "coolingSetpoint", value: temperature, displayed: false, isStateChange: true)
+            sendEvent(name: "thermostatSetpoint", value: temperature, displayed: false, isStateChange: true)
+            sendEvent(name: "targetTemperature", value: temperature)
             updateDataValue("lastRunningMode", "cool")
             break
         case "auto":
-            events.add(sendEvent(name: "statusText", value: "Auto Mode: ${temperature}°", displayed: false))
-            events.add(sendEvent(name: "targetTemperature", value: temperature))
+            sendEvent(name: "statusText", value: "Auto Mode: ${temperature}°", displayed: false)
+            sendEvent(name: "targetTemperature", value: temperature)
             updateDataValue("lastRunningMode", "auto")
             break
         case "off":
-            events.add(sendEvent(name: "statusText", value: "System is off", displayed: false))
-            events.add(sendEvent(name: "thermostatOperatingState", value: "idle", displayed: false, isStateChange: true))
+            sendEvent(name: "statusText", value: "System is off", displayed: false)
+            sendEvent(name: "thermostatOperatingState", value: "idle", displayed: false, isStateChange: true)
             updateDataValue("lastRunningMode", "off")
             break
     }
 
     if (turnOff){
-        events.add(sendEvent(name: "switch", value: "off", displayed: false))
+        sendEvent(name: "switch", value: "off", displayed: false)
     } else {
-        events.add(sendEvent(name: "switch", value: "on", displayed: false))
+        sendEvent(name: "switch", value: "on", displayed: false)
     }
 }
 
 private updateDevice(temperature, mode, turnOff) {
-    log_debug("updateDevice with temperature: ${temperature}, mode: ${mode} and turnOff: ${turnOff}")
+    Utils.toLogger("debug", "updateDevice with temperature: ${temperature}, mode: ${mode} and turnOff: ${turnOff}")
     if(temperature != null) {
         float temp = FormatTemperature(temperature, isFahrenheit())
-        log_debug("updateDevice real temperature: ${temp}")
+        Utils.toLogger("debug", "updateDevice real temperature: ${temp}")
         parent.childSetTemp(device.deviceNetworkId, temp)
     }
     
@@ -520,7 +522,7 @@ def async_set_outside_temperature(self, outside_temperature) {
 }
 
 def set_hvac_mode(hvac_mode) {
-    log_debug("set_hvac_mode - hvac_mode: ${hvac_mode}")
+    Utils.toLogger("debug", "set_hvac_mode - hvac_mode: ${hvac_mode}")
 
     //Set new hvac mode.
     parent.send_time(device.deviceNetworkId)
@@ -547,7 +549,7 @@ def set_preset_mode(self, preset_mode) {
             parent.set_away_mode(device.deviceNetworkId, 0)
             //self.set_hvac_mode(self.hvac_mode)
         } else {
-            log_error("Unable to set preset mode: ${preset_mode}.")
+            Utils.toLogger("error", "Unable to set preset mode: ${preset_mode}.")
         }
     }
 }
@@ -556,21 +558,21 @@ private timeStringToMins(String timeString) {
 	if (timeString?.contains(':')) {
     	def hoursandmins = timeString.split(":")
         def mins = hoursandmins[0].toInteger() * 60 + hoursandmins[1].toInteger()
-        log_debug("${timeString} converted to ${mins}")
+        Utils.toLogger("debug", "${timeString} converted to ${mins}")
         return mins
     }
 }
 
 private minsToTimeString(Integer intMins) {
 	def timeString =  "${(intMins/60).toInteger()}:${(intMins%60).toString().padLeft(2, "0")}"
-    log_debug("${intMins} converted to ${timeString}")
+    Utils.toLogger("debug", "${intMins} converted to ${timeString}")
     return timeString
 }
 
 private timeStringToHoursMins(String timeString) {
 	if (timeString?.contains(':')) {
     	def hoursMins = timeString.split(":")
-        log_debug("${timeString} converted to ${hoursMins[0]}:${hoursMins[1]}")
+        Utils.toLogger("debug", "${timeString} converted to ${hoursMins[0]}:${hoursMins[1]}")
         return hoursMins
     }
 }
@@ -579,7 +581,7 @@ private minsToHoursMins(Integer intMins) {
 	def hoursMins = []
     hoursMins << (intMins/60).toInteger()
     hoursMins << (intMins%60).toInteger()
-    log_debug("${intMins} converted to ${hoursMins[0]}:${hoursMins[1]}")
+    Utils.toLogger("debug", "${intMins} converted to ${hoursMins[0]}:${hoursMins[1]}")
     return hoursMins
 }
 
@@ -672,17 +674,29 @@ float getMinTemperature()
     }
 }
 
-def log_debug(logData)
-{
-    if (parent.childGetDebugState() || logDebug) log.debug("${device} (${device.deviceNetworkId}) - " + logData)
+def deviceLog(level, msg) {
+    Utils.toLogger(level, msg)
 }
 
-def log_warn(logData)
-{
-    if (parent.childGetWarnState() || logWarn) log.warn("${device} (${device.deviceNetworkId}) - " + logData)
-}
+/**
+ * Simple utilities for manipulation
+ */
 
-def log_error(logData)
-{
-    if (parent.childGetErrorState() ||logError) log.error("${device} (${device.deviceNetworkId}) - " + logData)
+def Utils_create() {
+    def instance = [:];
+    
+    instance.toLogger = { level, msg ->
+        if (level && msg) {
+            Integer levelIdx = LOG_LEVELS.indexOf(level);
+            Integer setLevelIdx = LOG_LEVELS.indexOf(logLevel);
+            if (setLevelIdx < 0) {
+                setLevelIdx = LOG_LEVELS.indexOf(DEFAULT_LOG_LEVEL);
+            }
+            if (levelIdx <= setLevelIdx || levelIdx <= parent.childGetLogLevel()) {
+                log."${level}" "${device.displayName} ${msg}";
+            }
+        }
+    }
+
+    return instance;
 }
