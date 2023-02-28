@@ -18,6 +18,7 @@
  *  Version: 1.1 - Fixed thread issues + added options to thermostat
  *  Version: 1.2 - Fixed zero length response introduced by firmware 2.2.6
  *  Version: 1.3 - Fixed how the parameters are set (firmware update broke it)
+ *  Version: 1.4 - Decreased the amount of overload messages (login and close connection messages), changed log system
  */
 
 import groovy.transform.Field
@@ -27,6 +28,10 @@ import java.util.concurrent.TimeUnit
 import hubitat.helper.HexUtils
 import hubitat.helper.InterfaceUtils
 import hubitat.device.Protocol
+
+@Field Utils = Utils_create();
+@Field List<String> LOG_LEVELS = ["error", "warn", "info", "debug", "trace"]
+@Field String DEFAULT_LOG_LEVEL = LOG_LEVELS[1]
 
 @Field final static String all_unit = "FFFFFFFF"
 //sequential number to identify the current request. Could be any unique number that is different at each request
@@ -125,7 +130,7 @@ import hubitat.device.Protocol
 @Field static int queueSize = 0
 @Field static int socketErrors = 0
 
-def driverVer() { return "1.3" }
+def driverVer() { return "1.4" }
 
 metadata {
     definition(name: "Sinope Neviweb Hub", namespace: "rferrazguimaraes", author: "Rangner Ferraz Guimaraes") {
@@ -142,47 +147,45 @@ metadata {
         input("sinopehubport", "string", title: "Neviweb Hub IP Port", description: "Default 4550", required: true, defaultValue: 4550)
         input("sinopehubid", "string", title: "Neviweb Hub ID (no spaces)", required: true)
         input name: "pollIntervals", type: "enum", title: "Set the Poll Interval.", options: [0:"off", 60:"1 minute", 120:"2 minutes", 300:"5 minutes"], required: true, defaultValue: "600"
-    	input("logDebug", "bool", title: "Enable debug logging", defaultValue: true)
-    	input("logWarn", "bool", title: "Enable warn logging", defaultValue: true)
-    	input("logError", "bool", title: "Enable error logging", defaultValue: true)
+        input name: "logLevel", title: "Log Level", type: "enum", options: LOG_LEVELS, defaultValue: DEFAULT_LOG_LEVEL, required: true
     }
 }
 
 def refresh() {
-    log_debug("Refreshing all children (done from Bridge)")
+    Utils.toLogger("debug", "Refreshing all children (done from Bridge)")
     getChildDevices().each
     {
         def dni = it.deviceNetworkId
         if (dni != null)
         {
-            log_debug("Requesting (${counter}) updated temperature information for ${dni}")
+            Utils.toLogger("debug", "Requesting (${counter}) updated temperature information for ${dni}")
             it.refreshInfo()
         }
     }
 }
 
 def initialize() {
-    log_debug("initialize()")
+    Utils.toLogger("debug", "initialize()")
     configure()
 }
 
 def installed() {
-    log_debug("installed()")
+    Utils.toLogger("debug", "installed()")
     configure()
 }
 
 def uninstalled() {
-    log_debug("uninstalled()")
+    Utils.toLogger("debug", "uninstalled()")
     removeAllThermostats()
 }
 
 def updated() {
-    log_debug("updated()")
+    Utils.toLogger("debug", "updated()")
     configure()    
 }
 
 def configure() {    
-    log_warn("configure...")
+    Utils.toLogger("warn", "configure...")
     updateDataValue("driverVersion", driverVer())
     resetPoolCommand()
     unschedule()
@@ -192,7 +195,7 @@ def configure() {
 
 def addThermostat() {
     synchronized(mutexSendCommand) {
-        log_debug("Adding Thermostat")
+        Utils.toLogger("debug", "Adding Thermostat")
         resetCloseSocketTimer()
         sendCommand(makeRequest("sendRequestResponse", byteArrayToHexString(login_request())))
         sendCommand(makeRequest("addThermostat", ""))
@@ -200,17 +203,17 @@ def addThermostat() {
 }
 
 def removeAllThermostats() {
-    log_debug("Removing All Child Thermostats")
+    Utils.toLogger("debug", "Removing All Child Thermostats")
     try {
         getChildDevices()?.each {
             try {
                 deleteChildDevice(it.deviceNetworkId)
             } catch (e) {
-                log_debug("Error deleting ${it.deviceNetworkId}, probably locked into a SmartApp: ${e}")
+                Utils.toLogger("debug", "Error deleting ${it.deviceNetworkId}, probably locked into a SmartApp: ${e}")
             }
         }
     } catch (err) {
-        log_debug("Either no children exist or error finding child devices for some reason: ${err}")
+        Utils.toLogger("debug", "Either no children exist or error finding child devices for some reason: ${err}")
     }
 }
 
@@ -225,7 +228,8 @@ def getDeviceIDfromDNI(dni)
 def childRequestingRefresh(String dni) {
     //Send Refresh command - this will occur for all thermostats, not just the one which requested it
     def deviceID = getDeviceIDfromDNI(dni)
-    log_debug("Requesting refreshed info for ${dni}")
+    Utils.toLogger("debug", "Requesting refreshed info for ${dni}")
+    
     sendRequest(self, data_read_request(data_read_command, deviceID, data_temperature))
     sendRequest(self, data_read_request(data_read_command, deviceID, data_setpoint))
     sendRequest(self, data_read_request(data_read_command, deviceID, data_heat_level))
@@ -244,12 +248,12 @@ def dailyReport() {
 def childSetTemp(String dni, float temperature) {
     //Send Child Set Temp command
     def deviceID = getDeviceIDfromDNI(dni)
-    log_debug("Requesting ${temperature} degrees for child ${deviceID}")
+    Utils.toLogger("debug", "Requesting ${temperature} degrees for child ${deviceID}")
     sendRequest(dni, data_write_request(data_write_command, deviceID, data_setpoint, set_temperature(temperature)))
 }
 
 def get_climate_device_data(String dni) {
-    log_debug("get_climate_device_data")
+    Utils.toLogger("debug", "get_climate_device_data")
      // Get device data
      // send requests
     try {
@@ -260,7 +264,7 @@ def get_climate_device_data(String dni) {
         sendRequest(self, data_read_request(data_read_command, deviceID, data_mode))
         sendRequest(self, data_read_request(data_read_command, deviceID, data_away))
     } catch(e) {
-        log_debug("Cannot get climate data")
+        Utils.toLogger("debug", "Cannot get climate data")
     }
 }
 
@@ -274,7 +278,7 @@ def get_climate_device_info(String dni) {
         sendRequest(self, data_read_request(data_read_command, deviceID, data_load))
         sendRequest(self, data_read_request(data_read_command, deviceID, data_power_connected))
     } catch(e) {
-        log_debug("Cannot get climate info")
+        Utils.toLogger("debug", "Cannot get climate info")
     }
 }
 
@@ -283,7 +287,7 @@ def get_power_load(data) { // get power in watt use by the device
     def deviceID = data[26..33]
     def status = data[20..21]
     if (status != "0A") {
-        log_debug("Status code: ${status} (Wrong answer ? ${deviceID}) ${data}")
+        Utils.toLogger("debug", "Status code: ${status} (Wrong answer ? ${deviceID}) ${data}")
         return None // device didn't answer, wrong device
     } else {
         def tc2 = data[46..47]
@@ -295,37 +299,37 @@ def get_power_load(data) { // get power in watt use by the device
 }
 
 def get_temperature(data) {
-    log_debug("get_temperature data: ${data}")
+    Utils.toLogger("debug", "get_temperature data: ${data}")
     def sequence = data[12..19]
-    log_debug("get_temperature sequence: ${sequence}")
+    Utils.toLogger("debug", "get_temperature sequence: ${sequence}")
     def deviceID = data[26..33]
-    log_debug("get_temperature deviceID: ${deviceID}")
+    Utils.toLogger("debug", "get_temperature deviceID: ${deviceID}")
     def status = data[20..21]
-    log_debug("get_temperature status: ${status}")
+    Utils.toLogger("debug", "get_temperature status: ${status}")
     if (status != "0A") {
-        log_debug("Status code: ${status} (device didn't answer, wrong device ${deviceID}), Data:(${data})", status, deviceID, data)
+        Utils.toLogger("debug", "Status code: ${status} (device didn't answer, wrong device ${deviceID}), Data:(${data})", status, deviceID, data)
         return None // device didn't answer, wrong device
     } else {
         def tc2 = data[46..47]
         def tc4 = data[48..49]
         def latemp = tc4+tc2
         if (latemp == "7FFC" || latemp == "7FFA") {
-            log_debug("Error code: ${latemp} (None or invalid value for ${deviceID}), Data:(${data})", latemp, deviceID, data)
+            Utils.toLogger("debug", "Error code: ${latemp} (None or invalid value for ${deviceID}), Data:(${data})", latemp, deviceID, data)
             return 0
         } else if (latemp == "7ff8" || latemp == "7FFF") {
-            log_debug("Error code: ${latemp} (Temperature higher than maximum range for ${deviceID})", latemp, deviceID)
+            Utils.toLogger("debug", "Error code: ${latemp} (Temperature higher than maximum range for ${deviceID})", latemp, deviceID)
             return 0
         } else if (latemp == "7FF9" || latemp == "8000" || latemp == "8001") {
-            log_debug("Error code: ${latemp} (Temperature lower than minimum range for ${deviceID})", latemp, deviceID)
+            Utils.toLogger("debug", "Error code: ${latemp} (Temperature lower than minimum range for ${deviceID})", latemp, deviceID)
             return 0
         } else if (latemp == "7FF6" || latemp == "7FF7" || latemp == "7FFd" || latemp == "7FFE") {
-            log_debug("Error code: ${latemp} (Defective device temperature sensor for ${deviceID}), Data:(${data})", latemp, deviceID, data)
+            Utils.toLogger("debug", "Error code: ${latemp} (Defective device temperature sensor for ${deviceID}), Data:(${data})", latemp, deviceID, data)
             return 0
         } else if (latemp == "7FFb") {
-            log_debug("Error code: ${latemp} (Overload for ${deviceID})", latemp, deviceID)
+            Utils.toLogger("debug", "Error code: ${latemp} (Overload for ${deviceID})", latemp, deviceID)
             return 0
         } else if (latemp == "7FF5") {
-            log_debug("Error code: ${latemp} (Internal error for ${deviceID}), Data:(${data})", latemp, deviceID, data)
+            Utils.toLogger("debug", "Error code: ${latemp} (Internal error for ${deviceID}), Data:(${data})", latemp, deviceID, data)
             return 0
         } else {
             return Math.round(hexToInt(latemp)* 0.01 * 100) / 100
@@ -339,7 +343,7 @@ def get_away(data) {
     def deviceID = data[26..33]
     def status = data[20..21]
     if (status != "0A") {
-        log_debug("Status code: ${status} (device didn't answer, wrong device ${deviceID}) Data:(${data})")
+        Utils.toLogger("debug", "Status code: ${status} (device didn't answer, wrong device ${deviceID}) Data:(${data})")
         return None // device didn't answer, wrong device
     } else {
         tc2 = data[46..47]
@@ -356,11 +360,11 @@ def get_mode(data) {
     def deviceID = data[26..33]
     def status = data[20..21]
     if (status != "0A") {
-        log_debug("Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
+        Utils.toLogger("debug", "Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
         return None // device didn't answer, wrong device
     } else {
         def tc2 = data[46..47]
-        log_debug("get_mode sequence: ${sequence} deviceID: ${deviceID}) status: ${status} tc2: ${tc2}")
+        Utils.toLogger("debug", "get_mode sequence: ${sequence} deviceID: ${deviceID}) status: ${status} tc2: ${tc2}")
         return hexToFloatInt(tc2)
         //return int(float.fromhex(tc2))
     }
@@ -391,7 +395,7 @@ def set_away_mode(String dni, away) {
             sendRequest(dni, data_write_request(data_write_command, deviceID, data_away, set_away(away)))
         }
     } catch(e) {
-        log_debug("Cannot set device away")
+        Utils.toLogger("debug", "Cannot set device away")
     } 
 }
 
@@ -402,7 +406,7 @@ def set_all_away(self, away) {
     }
     catch (e)
     {
-        log_debug("Cannot set all devices to away or home mode: ${e}")
+        Utils.toLogger("debug", "Cannot set all devices to away or home mode: ${e}")
     }
 }
 
@@ -411,7 +415,7 @@ def get_light_state(data) {
     def deviceID = data[26..33]
     def status = data[20..21]
     if (status != "0A") {
-        log_debug("get_light_state - Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
+        Utils.toLogger("debug", "get_light_state - Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
         return None // device didn't answer, wrong device
     } else {
         def tc2 = data[46..47]
@@ -428,7 +432,7 @@ def get_light_idle(data) {
     def deviceID = data[26..33]
     def status = data[20..21]
     if (status != "0A") {
-        log_debug("get_light_idle - Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
+        Utils.toLogger("debug", "get_light_idle - Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
         return None // device didn't answer, wrong device
     } else {
         def tc2 = data[46..47]
@@ -448,7 +452,7 @@ def set_backlight_state(String dni, state) {
     }
     catch (e)
     {
-        log_debug("Cannot change backlight device state: ${e}")
+        Utils.toLogger("debug", "Cannot change backlight device state: ${e}")
     }
 }
 
@@ -460,7 +464,7 @@ def set_backlight_idle(String dni, level) {
     }
     catch (e)
     {
-        log_debug("Cannot change device backlight level: ${e}")
+        Utils.toLogger("debug", "Cannot change device backlight level: ${e}")
     }
 }
 
@@ -469,7 +473,7 @@ def get_lock(data) {
     def deviceID = data[26..33]
     def status = data[20..21]
     if (status != "0A") {
-        log_debug("get_lock - Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
+        Utils.toLogger("debug", "get_lock - Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
         return None // device didn't answer, wrong device
     } else {
         def tc2 = data[46..47]
@@ -489,7 +493,7 @@ def set_keyboard_lock(String dni, lock) {
     }
     catch (e)
     {
-        log_error("Cannot change lock device state: ${e}")
+        Utils.toLogger("error", "Cannot change lock device state: ${e}")
     }
 }
 
@@ -498,7 +502,7 @@ def get_secondary_display(data) {
     def deviceID = data[26..33]
     def status = data[20..21]
     if (status != "0A") {
-        log_debug("get_secondary_display - Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
+        Utils.toLogger("debug", "get_secondary_display - Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
         return None // device didn't answer, wrong device
     } else {
         def tc2 = data[46..47]
@@ -518,7 +522,7 @@ def set_secondary_display(String dni, display) {
     }
     catch (e)
     {
-        log_error("Cannot change secondary display: ${e}")
+        Utils.toLogger("error", "Cannot change secondary display: ${e}")
     }
 }
 
@@ -527,7 +531,7 @@ def get_temperature_format(data) {
     def deviceID = data[26..33]
     def status = data[20..21]
     if (status != "0A") {
-        log_debug("get_temperature_format - Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
+        Utils.toLogger("debug", "get_temperature_format - Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
         return None // device didn't answer, wrong device
     } else {
         def tc2 = data[46..47]
@@ -547,7 +551,7 @@ def set_temperature_format(String dni, temperatureFormat) {
     }
     catch (e)
     {
-        log_error("Cannot change temperature format: ${e}")
+        Utils.toLogger("error", "Cannot change temperature format: ${e}")
     }
 }
 
@@ -556,7 +560,7 @@ def get_time_format(data) {
     def deviceID = data[26..33]
     def status = data[20..21]
     if (status != "0A") {
-        log_debug("get_time_format - Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
+        Utils.toLogger("debug", "get_time_format - Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
         return None // device didn't answer, wrong device
     } else {
         def tc2 = data[46..47]
@@ -576,7 +580,7 @@ def set_time_format(String dni, timeFormat) {
     }
     catch (e)
     {
-        log_error("Cannot change time format: ${e}")
+        Utils.toLogger("error", "Cannot change time format: ${e}")
     }
 }
 
@@ -585,7 +589,7 @@ def get_early_start(data) {
     def deviceID = data[26..33]
     def status = data[20..21]
     if (status != "0A") {
-        log_debug("get_early_start - Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
+        Utils.toLogger("debug", "get_early_start - Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
         return None // device didn't answer, wrong device
     } else {
         def tc2 = data[46..47]
@@ -605,7 +609,7 @@ def set_early_start(dni, isEnable) {
     }
     catch (e)
     {
-        log_error("Cannot change time format: ${e}")
+        Utils.toLogger("error", "Cannot change time format: ${e}")
     }
 }
 
@@ -616,7 +620,7 @@ def set_min_setpoint(dni, temperature) {
     }
     catch (e)
     {
-        log_error("Cannot set min temperature setpoint ${e}")
+        Utils.toLogger("error", "Cannot set min temperature setpoint ${e}")
     }
 }
 
@@ -627,7 +631,7 @@ def set_max_setpoint(dni, temperature) {
     }
     catch (e)
     {
-        log_error("Cannot set max temperature setpoint ${e}")
+        Utils.toLogger("error", "Cannot set max temperature setpoint ${e}")
     }
 }
 
@@ -638,7 +642,7 @@ def set_away_setpoint(dni, temperature) {
     }
     catch (e)
     {
-        log_error("Cannot set away temperature setpoint ${e}")
+        Utils.toLogger("error", "Cannot set away temperature setpoint ${e}")
     }
 }
 
@@ -653,7 +657,7 @@ def set_daily_report(self) {
     }
     catch (e)
     {
-        log_debug("Cannot send daily report to each devices: ${e}")
+        Utils.toLogger("debug", "Cannot send daily report to each devices: ${e}")
     }
 }
 
@@ -666,70 +670,70 @@ def set_hourly_report(self, device_id, outside_temperature) {
     }
     catch (e)
     {
-        log_debug("Cannot send outside temperature report to each devices: ${e}")
+        Utils.toLogger("debug", "Cannot send outside temperature report to each devices: ${e}")
     }
 }
 
 def set_date(zone) {
-    log_debug("set_date - zone is ${zone}")
+    Utils.toLogger("debug", "set_date - zone is ${zone}")
     //now = datetime.now(zone)
     //def timestamp = 1486146877214 // milliseconds
     //def date = new Date( timestamp ).toString()    
     //Date currentDate = new Date()
     //def timestamp = currentDate.getTime();
-    //log_debug("set_date - timestamp: ${timestamp}")    
+    //Utils.toLogger("debug", "set_date - timestamp: ${timestamp}")    
     //Date now = new Date( ((long)1604285937.1535 - (long)3600)  * 1000 )
-    //log_debug("set_date - timestamp: ${now}") 
+    //Utils.toLogger("debug", "set_date - timestamp: ${now}") 
     Date now = new Date()
     def day = now.getDay() - 1
-    //log_debug("set_date - day: ${day}")
+    //Utils.toLogger("debug", "set_date - day: ${day}")
     if (day == -1) {
         day = 6
     }
-    //log_debug("set_date - day: ${day}")
+    //Utils.toLogger("debug", "set_date - day: ${day}")
     def w = byteArrayToHexString(packInt(day)[0..0] as byte[]) //day of week, 0=monday converted to bytes
-    //log_debug("set_date - w: ${w}")
+    //Utils.toLogger("debug", "set_date - w: ${w}")
     def d = byteArrayToHexString(packInt(now.format('dd', zone).toInteger())[0..0] as byte[]) //day of month converted to bytes
-    //log_debug("set_date - d: ${d}")
+    //Utils.toLogger("debug", "set_date - d: ${d}")
     def m = byteArrayToHexString(packInt(now.format('MM', zone).toInteger())[0..0] as byte[]) //month converted to bytes
-    //log_debug("set_date - m: ${m}")
+    //Utils.toLogger("debug", "set_date - m: ${m}")
     def y = byteArrayToHexString(packInt(now.format('yy', zone).toInteger())[0..0] as byte[]) //year converted to bytes
-    //log_debug("set_date - y: ${y}")
+    //Utils.toLogger("debug", "set_date - y: ${y}")
     def date = '04'+w+d+m+y //xxwwddmmyy,  xx = length of data date = 04
-    //log_debug("set_date - time: ${date}")
+    //Utils.toLogger("debug", "set_date - time: ${date}")
     return date
 }
 
 def set_time(zone) {
-    log_debug("set_time - zone is ${zone}")
+    Utils.toLogger("debug", "set_time - zone is ${zone}")
     //now = datetime.now(zone)
     Date now = new Date()
     //Date now = new Date( ((long)1604285937.1535 - (long)3600)  * 1000 )
-    //log_debug("set_time - timestamp: ${now}")
+    //Utils.toLogger("debug", "set_time - timestamp: ${now}")
     def s = byteArrayToHexString(packInt(now.format('ss', zone).toInteger())[0..0] as byte[]) //second converted to bytes
-    //log_debug("set_time - s: ${s}")
+    //Utils.toLogger("debug", "set_time - s: ${s}")
     def m = byteArrayToHexString(packInt(now.format('mm', zone).toInteger())[0..0] as byte[]) //minutes converted to bytes
-    //log_debug("set_time - m: ${m}")
+    //Utils.toLogger("debug", "set_time - m: ${m}")
     def h = byteArrayToHexString(packInt(now.format('HH', zone).toInteger()+get_dst(zone))[0..0] as byte[]) //hours converted to bytes
-    //log_debug("set_time - h: ${h}")
+    //Utils.toLogger("debug", "set_time - h: ${h}")
     def time = '03'+s+m+h //xxssmmhh  24hr, 16:09:00 pm, xx = length of data time = 03
-    //log_debug("set_time - time: ${time}")
+    //Utils.toLogger("debug", "set_time - time: ${time}")
     return time
 }
 
 def set_sun_time(zone, period) { // period = sunrise or sunset
-    //log_debug("set_sun_time - period is ${period}")
+    //Utils.toLogger("debug", "set_sun_time - period is ${period}")
     def Date now = period == "sunrise" ? location.sunrise : location.sunset
     //now = new Date( ((long)1604285937.1535 - (long)3600)  * 1000 )    
-    //log_debug("set_sun_time - timestamp: ${now}")
+    //Utils.toLogger("debug", "set_sun_time - timestamp: ${now}")
     def s = byteArrayToHexString(packInt(now.format('ss', zone).toInteger())[0..0] as byte[]) //second converted to bytes
-    //log_debug("set_sun_time - s: ${s}")
+    //Utils.toLogger("debug", "set_sun_time - s: ${s}")
     def m = byteArrayToHexString(packInt(now.format('mm', zone).toInteger())[0..0] as byte[]) //minutes converted to bytes
-    //log_debug("set_sun_time - m: ${m}")
+    //Utils.toLogger("debug", "set_sun_time - m: ${m}")
     def h = byteArrayToHexString(packInt(now.format('HH', zone).toInteger()+get_dst(location.timeZone))[0..0] as byte[])  //hours converted to bytes
-    //log_debug("set_sun_time - h: ${h}")
+    //Utils.toLogger("debug", "set_sun_time - h: ${h}")
     def time = '03'+s+m+h //xxssmmhh  24hr, 16:09:00 pm, xx = length of data time = 03
-    //log_debug("set_sun_time - time: ${time}")
+    //Utils.toLogger("debug", "set_sun_time - time: ${time}")
     return time
 }
 
@@ -738,7 +742,7 @@ def get_heat_level(data) {
     def deviceID = data[26..33]
     def status = data[20..21]
     if (status != "0A") {
-        log_debug("Status code for device ${deviceID}: (wrong answer ? ${status}), data:(${data})")
+        Utils.toLogger("debug", "Status code for device ${deviceID}: (wrong answer ? ${status}), data:(${data})")
         return None // device didn't answer, wrong device
     } else {
         def tc2 = data[46..47]
@@ -749,9 +753,9 @@ def get_heat_level(data) {
 
 def set_temperature(temp_celcius) {
     def temp = temp_celcius*100 as Integer
-    //log_debug("set_temperature - temp is ${temp}")
-    //log_debug("set_temperature - packint is ${packInt(temp)[0..1]}")
-    //log_debug("set_temperature - temp is 02${byteArrayToHexString(packInt(temp)[0..1] as byte[])}")
+    //Utils.toLogger("debug", "set_temperature - temp is ${temp}")
+    //Utils.toLogger("debug", "set_temperature - packint is ${packInt(temp)[0..1]}")
+    //Utils.toLogger("debug", "set_temperature - temp is 02${byteArrayToHexString(packInt(temp)[0..1] as byte[])}")
     return "02" + byteArrayToHexString(packInt(temp)[0..1] as byte[])
 }
 
@@ -762,7 +766,7 @@ def send_time(dni) {
         def tz = location.timeZone
         sendRequest(dni, data_write_request(data_write_command, deviceID, data_time, set_time(tz)))
     } catch(e) {
-        log_debug("Cannot send current time to device")
+        Utils.toLogger("debug", "Cannot send current time to device")
     }
 }
  
@@ -777,7 +781,7 @@ def set_mode(dni, device_type, mode) {
             sendRequest(dni, data_write_request(data_write_command, deviceID, data_light_mode, put_mode(mode)))
         }
     } catch(e) {
-        log_debug("Cannot set device operation mode")
+        Utils.toLogger("debug", "Cannot set device operation mode")
     }
 }
 
@@ -790,14 +794,14 @@ def get_result(data) { // check if data write was successfull, return True or Fa
     } else if (tc2.toString() =="01") { //data report
         return True
     } else {
-        log_debug("Status code: ${tc2} (Wrong answer ? ${deviceID}) ${data}")
+        Utils.toLogger("debug", "Status code: ${tc2} (Wrong answer ? ${deviceID}) ${data}")
     }
     return False
 }
 
 // This function receives the response from the Sinope Hub bridge and updates things, or passes the response to an individual thermostat
 def parse(response) {
-    log_debug("parse Response is ${response} and size is ${hexStringToByteArray(response).size()}")
+    Utils.toLogger("debug", "parse Response is ${response} and size is ${hexStringToByteArray(response).size()}")
     
     def respLength = response.length()
     if(respLength == null || respLength == 0)
@@ -842,28 +846,28 @@ def processResponse(response)
     unschedule(runAllActions5Sec)
     schedule("0/1 * * * * ?", runAllActions1Sec)
     def typeName = device.getDataValue("type")
-    log_debug("Processing response to " + typeName)
+    Utils.toLogger("debug", "Processing response to " + typeName)
 
     if (typeName == "getAPIKey")
     {
-        log_debug("received getAPIKey command state.APIKey before: ${state.APIKey}")
+        Utils.toLogger("debug", "received getAPIKey command state.APIKey before: ${state.APIKey}")
         state.APIKey = retreive_key(response)[0..15]
-        log_debug("state.APIKey after: ${state.APIKey}")
+        Utils.toLogger("debug", "state.APIKey after: ${state.APIKey}")
         if (sinopehubapikey == "0000000000000000") // isso está errado 0..15 da menos que esse valor
         {
-            log.info("API Key request failed. Check your Neviweb Hub ID")
+             Utils.toLogger("info", "API Key request failed. Check your Neviweb Hub ID")
             state.APIKey = null
         }
         else
         {
-            log.info("API Key saved: ${state.APIKey}")
+            Utils.toLogger("info", "API Key saved: ${state.APIKey}")
         }
     }
     else if (typeName == "addThermostat")
     {
-        log_debug("received addThermostat command response: ${response}")
+        Utils.toLogger("debug", "received addThermostat command response: ${response}")
         def deviceID = response[14..21]
-        log_debug("deviceID: ${deviceID}")
+        Utils.toLogger("debug", "deviceID: ${deviceID}")
 
         //Prepare Thermostat name - prepend and postpend of settings if they exist
         def thisthermostatname = "Sinope Thermostat" //+ deviceID
@@ -871,14 +875,14 @@ def processResponse(response)
         //Prepare DNI - Remove spaces and replace with a hyphen to prevent problems with HTML requests
         def thisthermostatdni = "${deviceID}" //item.key.replaceAll(" ", "+")
 
-        log_debug("Adding child Name: ${thisthermostatname}, DNI: ${thisthermostatdni}, Stat ID: ${deviceID} to Hub: ${device.hub.id}")
+        Utils.toLogger("debug", "Adding child Name: ${thisthermostatname}, DNI: ${thisthermostatdni}, Stat ID: ${deviceID} to Hub: ${device.hub.id}")
         try
         {
             addChildDevice("rferrazguimaraes", "Sinope Thermostat", thisthermostatdni, [name: thisthermostatname, isComponent: false])
         }
         catch (e)
         {
-            log_debug("Couldnt add device, probably already exists: ${e}")
+            Utils.toLogger("debug", "Couldnt add device, probably already exists: ${e}")
         }
 
     }
@@ -912,7 +916,7 @@ def processResponse(response)
     }
     else
     {
-        log_error("Unknown source of response")
+        Utils.toLogger("error", "Unknown source of response")
     }
 }
 
@@ -925,39 +929,39 @@ def get_data_push(data) { //will be used to send data pushed by GT125 when light
 }
 
 def sendRequestResponse(response) {
-    log_debug("received sendRequestResponse command response: ${response}")
+    Utils.toLogger("debug", "received sendRequestResponse command response: ${response}")
     def status = response[0..13]
-    log_debug("status is ${status}")
+    Utils.toLogger("debug", "status is ${status}")
     if (status == "55000C001101FF")
     {
-        log_debug("Login fail, please check your APIKey")
+        Utils.toLogger("debug", "Login fail, please check your APIKey")
     }
     else // 55000C00110100 - Login ok
     {
-        log_debug("Login ok !")
+        Utils.toLogger("debug", "Login ok !")
     }
 }
 
 def analyseDataResponse(response) {
-    log_debug("received analyseDataResponse command response: ${response}")
+    Utils.toLogger("debug", "received analyseDataResponse command response: ${response}")
     if (crc_check(hexStringToByteArray(response))) {  // receive acknoledge, check status and if we will receive more data
-        log_debug("analyseDataResponse response accepted")
-        log_debug("Reply et longueur du data = ${hexStringToByteArray(response).size()} - ${response}")
+        Utils.toLogger("debug", "analyseDataResponse response accepted")
+        Utils.toLogger("debug", "Reply et longueur du data = ${hexStringToByteArray(response).size()} - ${response}")
         def deviceID = response[26..33]
-        log_debug("deviceID: ${deviceID}")
+        Utils.toLogger("debug", "deviceID: ${deviceID}")
         def typeName = device.getDataValue("type")
         if (hexStringToByteArray(response).size() == 19) {
-            log_debug("hexStringToByteArray(response).size() == 19")
+            Utils.toLogger("debug", "hexStringToByteArray(response).size() == 19")
             def seq_num = response[12..19] //sequence id to link response to the correct request
-            log_debug("seq_num: ${seq_num}")
+            Utils.toLogger("debug", "seq_num: ${seq_num}")
             def status = response[20..21]
-            log_debug("status: ${status}")
+            Utils.toLogger("debug", "status: ${status}")
             def more = response[24..25] //check if we will receive other data
-            log_debug("more: ${more}")
+            Utils.toLogger("debug", "more: ${more}")
             if (status == "00") { // request status = ok for read and write, we go on (read=00, report=01, write=00)
-                log_debug("request status = ok for read and write")
+                Utils.toLogger("debug", "request status = ok for read and write")
                 if (more == "01") { //GT125 is sending another data response
-                    log_debug("analyseDataResponse - GT125 is sending another data response")
+                    Utils.toLogger("debug", "analyseDataResponse - GT125 is sending another data response")
                     if(typeName == "dataRead1Response")
                     {
                         device.updateDataValue("type", "dataRead2Response")
@@ -971,12 +975,12 @@ def analyseDataResponse(response) {
                         device.updateDataValue("type", "dataWrite2Response")
                     }
                 } else {
-                    log_debug("No more response...")
+                    Utils.toLogger("debug", "No more response...")
                     //closeSocket()
                     //return False
                 }
             } else if (status == "01") { //status ok for data report
-                log_debug("status ok for data report")
+                Utils.toLogger("debug", "status ok for data report")
                 if(typeName == "dataRead1Response")
                 {
                     updateChild("read", response)
@@ -992,24 +996,24 @@ def analyseDataResponse(response) {
                 //closeSocket()
                 //return response
             } else {
-                log_error("analyseDataResponse - Error... status: ${status} deviceID: ${deviceID}")
+                Utils.toLogger("error", "analyseDataResponse - Error... status: ${status} deviceID: ${deviceID}")
                 error_info(status, deviceID)
                 //closeSocket()
                 //return False
             }
         } else if (hexStringToByteArray(response).size() > 19) { // case data received with the acknowledge
-            log_debug("hexStringToByteArray(response).size() > 19")
+            Utils.toLogger("debug", "hexStringToByteArray(response).size() > 19")
             def sizeResponse = response.size()
             //def datarec = response[19..sizeResponse-1]
             def datarec = response[38..sizeResponse-1]
-            log_debug("datarec: ${datarec}")
+            Utils.toLogger("debug", "datarec: ${datarec}")
             //def state = binascii.hexlify(datarec)[20..21]
             if(datarec.size() >= 21) {
                 def state = datarec[20..21]
                 if (state == "00") { // request has been queued, will receive another answer later
-                    log_debug("analyseDataResponse - Request queued for device ${deviceID}, waiting...")
+                    Utils.toLogger("debug", "analyseDataResponse - Request queued for device ${deviceID}, waiting...")
                 } else if (state == "0A") { //we got an answer
-                    log_debug("we got an answer: ${datarec}")
+                    Utils.toLogger("debug", "we got an answer: ${datarec}")
                     if(typeName == "dataRead1Response")
                     {
                         updateChild("read", datarec)
@@ -1024,54 +1028,54 @@ def analyseDataResponse(response) {
                     }
                     //return datarec
                 } else if (state == "0B") { // we receive a push notification
-                    log_debug("we receive a push notification ${datarec}")
+                    Utils.toLogger("debug", "we receive a push notification ${datarec}")
                     get_data_push(datarec)
                 } else {
-                    log_error("analyseDataResponse - Bad answer received, data: ${datarec}")
+                    Utils.toLogger("error", "analyseDataResponse - Bad answer received, data: ${datarec}")
                     error_info(state, deviceID)
                     //closeSocket()
                     //return False	
                 }
             } else {
-                log_error("Bad response, Check response: ${response} - datarec: ${datarec}")
+                Utils.toLogger("error", "Bad response, Check response: ${response} - datarec: ${datarec}")
                 //closeSocket()
             }
         } else {
-            log_error("Bad response, Check data ${response}")
+            Utils.toLogger("error", "Bad response, Check data ${response}")
             //closeSocket()
         }            
     } else {
-        log_error("Bad response, crc error...")
+        Utils.toLogger("error", "Bad response, crc error...")
         //closeSocket()
     } 
 }    
     
 def updateChild(updateType, response) {       
     
-    log_debug("received updateChild command ${updateType} response: ${response}") 
+    Utils.toLogger("debug", "received updateChild command ${updateType} response: ${response}") 
     def canUpdateChild = updateType == "report"
     def deviceID = response[26..33]
     if(!canUpdateChild)
     {
         def status = response[20..21]
-        log_debug("updateChild - GT125 is sending another data response")
+        Utils.toLogger("debug", "updateChild - GT125 is sending another data response")
         def state = status
         //while (state != "0a") {
         //datarec = sock.recv(1024)
         //state = binascii.hexlify(datarec)[20..21]
         state = response[20..21]
-        log_debug("more: ${state}")
+        Utils.toLogger("debug", "more: ${state}")
         if (state == "00") { // request has been queued, will receive another answer later
-            log_debug("!!!!!!!!!Request queued for device ${deviceID}, waiting...")
+            Utils.toLogger("debug", "!!!!!!!!!Request queued for device ${deviceID}, waiting...")
         } else if (state == "0A") { //we got an answer
-            log_debug("we got an answer: ${response}")
+            Utils.toLogger("debug", "we got an answer: ${response}")
             canUpdateChild = true
             //break
         } else if (state == "0B") { // we receive a push notification
-            log_debug("!!!!!!!!!!!!we receive a push notification")
+            Utils.toLogger("debug", "!!!!!!!!!!!!we receive a push notification")
             get_data_push(response)
         } else {
-            log_error("updateChild - Bad answer received, data: ${response}")//, binascii.hexlify(datarec))
+            Utils.toLogger("error", "updateChild - Bad answer received, data: ${response}")//, binascii.hexlify(datarec))
             error_info(state, deviceID)
             //return False
             //break
@@ -1089,7 +1093,7 @@ def updateChild(updateType, response) {
             }
             catch (e)
             {
-                log_debug("Couldnt process response, probably this child doesnt exist: ${e} in all_unit")
+                Utils.toLogger("debug", "Couldnt process response, probably this child doesnt exist: ${e} in all_unit")
             }
         }
         else
@@ -1102,7 +1106,7 @@ def updateChild(updateType, response) {
             }
             catch (e)
             {
-                log_debug("Couldnt process response, probably this child doesnt exist: ${e}")
+                Utils.toLogger("debug", "Couldnt process response, probably this child doesnt exist: ${e}")
             }
         }
     }
@@ -1202,38 +1206,38 @@ def sendInfoChild(updateType, response, deviceID, resultDevice)
                     resultDevice.processChildResponse([updateType: updateType, type: "backlight_idle", value: backlightIdle])
                 break
                 default:
-                    log_error("updateChild - Command ${commandType} not found!")
+                    Utils.toLogger("error", "updateChild - Command ${commandType} not found!")
                 break
             }
         }
     } else {
-        log_debug("Couldnt process response, probably this child doesnt exist - deviceID: ${deviceID}")
+        Utils.toLogger("debug", "Couldnt process response, probably this child doesnt exist - deviceID: ${deviceID}")
     }
 }
 
 def error_info(bug, device) {
     if (bug == 'FF' || bug == 'ff') {
-        log_error("in request for ${device} : Request failed (${bug}).")
+        Utils.toLogger("error", "in request for ${device} : Request failed (${bug}).")
     } else if (bug == '02') {
-        log_error("in request for ${device} : Request aborted (${bug}).")
+        Utils.toLogger("error", "in request for ${device} : Request aborted (${bug}).")
     } else if (bug == 'FE' || bug == 'fe') {
-        log_error("in request for ${device} : Buffer full, retry later (${bug}).")
+        Utils.toLogger("error", "in request for ${device} : Buffer full, retry later (${bug}).")
     } else if (bug == 'FC' || bug == 'fc') {
-        log_error("in request for ${device} : Device not responding (${bug}), no more answer, request aborted.")
+        Utils.toLogger("error", "in request for ${device} : Device not responding (${bug}), no more answer, request aborted.")
     } else if (bug == 'FB' || bug == 'fb') {
-        log_error("in request for ${device} : Abort failed, request not found in queue (${bug}).")
+        Utils.toLogger("error", "in request for ${device} : Abort failed, request not found in queue (${bug}).")
     } else if (bug == 'FA' || bug == 'fa') {
-        log_error("in request for ${device} : Unknown device or destination deviceID is invalid or not a member of this network (${bug}).")
+        Utils.toLogger("error", "in request for ${device} : Unknown device or destination deviceID is invalid or not a member of this network (${bug}).")
     } else if (bug == 'FD' || bug == 'fd') {
-        log_error("in request for ${device} : Error message reserved (${bug}), info not available.")
+        Utils.toLogger("error", "in request for ${device} : Error message reserved (${bug}), info not available.")
     } else {
-        log_error("in request for ${device} : Unknown error (${bug}).")
+        Utils.toLogger("error", "in request for ${device} : Unknown error (${bug}).")
     }
 }
 
 //These functions are helper functions to talk to the Sinope Bridge
 def sendCommand(paramsMap) {
-    log_debug("sendCommand - paramsMap: ${paramsMap}")
+    Utils.toLogger("debug", "sendCommand - paramsMap: ${paramsMap}")
     commandQueue.offer(paramsMap)
 }
 
@@ -1263,11 +1267,11 @@ def runAllActions()
     {
         if (commandQueue.size() > 0)
         {
-            log_debug("poolCommand canSendCommand")
+            Utils.toLogger("debug", "poolCommand canSendCommand")
 
             if(openSocket()) { 
                 try {
-                    log_debug("poolCommand sendSocketMessage commandQueue size: ${commandQueue.size()}")
+                    Utils.toLogger("debug", "poolCommand sendSocketMessage commandQueue size: ${commandQueue.size()}")
                     def paramsMap = commandQueue.poll()
 
                     if(paramsMap != null)
@@ -1276,15 +1280,18 @@ def runAllActions()
 
                         if(paramsMap.type == "getAPIKey")
                         {
-                            log.info("Press 'Web' button on hub")
+                            Utils.toLogger("info", "Press 'Web' button on hub")
                         }
                         else if(paramsMap.type == "addThermostat")
                         {
-                            log.info("Press the two buttons on the thermostat")
+                            Utils.toLogger("info", "Press the two buttons on the thermostat")
                         } 
+                        else if(paramsMap.type == "login_request")
+                        {
+                            Utils.toLogger("info", "login request ${paramsMap.data}")
+                        }
                         else if(paramsMap.type == "closeConnexion")
                         {
-                            log_debug("Closing Connexion")
                             closeSocket()
                         }
 
@@ -1299,19 +1306,19 @@ def runAllActions()
                         pauseExecution(1000)
                     }
                 } catch(e) {
-                    log_error("poolCommand: resetting pool command exception = [${e}]")
+                    Utils.toLogger("error", "poolCommand: resetting pool command exception = [${e}]")
                 }                    
             }
         }
 
         if(commandQueue.size() < queueSize && queueSize != (commandQueue.size() + 1))
         {
-            log_error("poolCommand queueSize is different - queueSize: ${queueSize} - commandSize: ${commandQueue.size()}")
+            Utils.toLogger("error", "poolCommand queueSize is different - queueSize: ${queueSize} - commandSize: ${commandQueue.size()}")
         }        
         
         if(commandQueue.size() > 0)
         {
-            log_debug("Setting queueSize: ${commandQueue.size()}")
+            Utils.toLogger("debug", "Setting queueSize: ${commandQueue.size()}")
         }
         
         queueSize = commandQueue.size()
@@ -1322,14 +1329,14 @@ def runAllActions()
             resetCloseSocketTimer()
             if (socketState != "closed" && commandQueue.size() == 0) {
 
-                log_debug("Trying to close socket - socketState: ${socketState}")
+                Utils.toLogger("debug", "Trying to close socket - socketState: ${socketState}")
                 closeSocket()
             }	
         }
     }
     else
     {
-        log.debug "Lock Acquire failed ... Aborting!"
+        Utils.toLogger("debug", "Lock Acquire failed ... Aborting!")
         mutex.release()
         exit
     }
@@ -1344,39 +1351,39 @@ def resetCloseSocketTimer()
 
 def openSocket() {
 	if (socketState == "open") {
-		log_debug("openSocket: Socket already opened.")
+		Utils.toLogger("debug", "openSocket: Socket already opened.")
 		return true
 	}
-	log_debug("openSocket: Connecting to ${sinopehubip}:${sinopehubport}")
+	Utils.toLogger("debug", "openSocket: Connecting to ${sinopehubip}:${sinopehubport}")
 	try {
-        log_debug("opening socket")
+        Utils.toLogger("debug", "opening socket")
 		InterfaceUtils.socketConnect(device, sinopehubip, sinopehubport.toInteger(), byteInterface: true)
 		//pauseExecution(1000)
         pauseExecution(100)
 		socketState = "open"
-		log_debug("openSocket: Socket opened.")
+		Utils.toLogger("debug", "openSocket: Socket opened.")
 		socketErrors = 0
 		return true
 	}
 	catch(e) {
-		log_error("openSocket: exception = ${e}")
+		Utils.toLogger("error", "openSocket: exception = ${e}")
         closeSocket()
 		return false
 	}
 }
 
 def closeSocket() {
-	log_debug("closeSocket: Socket close requested.")
+	Utils.toLogger("debug", "closeSocket: Socket close requested.")
 	socketState = "closing"
     InterfaceUtils.socketClose(device)
 	socketState = "closed"
 	pauseExecution(100)
-	log_debug("closeSocket: Socket closed.")
+	Utils.toLogger("debug", "closeSocket: Socket closed.")
 	return true
 }
 
 def socketStatus(String message) {
-	log_warn("socketStatus - Socket [${socketState}]  Message [${message}]")
+	Utils.toLogger("warn", "socketStatus - Socket [${socketState}]  Message [${message}]")
 	
 	if (socketState == "closed") 
     { 
@@ -1386,7 +1393,7 @@ def socketStatus(String message) {
 	switch(message) {
 		case "send error: Broken pipe (Write failed)":
 			closeSocket()
-			log_debug("socketStatus - Write Failed - Attempting reconnect")
+			Utils.toLogger("debug", "socketStatus - Write Failed - Attempting reconnect")
 			return //openSocket()
 			break;
 		case "receive error: Stream closed.":
@@ -1394,35 +1401,35 @@ def socketStatus(String message) {
 			socketErrors = socketErrors + 1
 			if ((socketState != "closing") && (SocketErrors < 10)) {
 				//closeSocket()
-				//log_debug("socketStatus - Stream Closed - Attempting reconnect [${SocketErrors}]")
+				//Utils.toLogger("debug", "socketStatus - Stream Closed - Attempting reconnect [${SocketErrors}]")
 				return //openSocket()
 			}
 			socketState = "closed"
 			if (socketErrors > 9) {
-				log_debug("socketStatus - Stream Closed - Too many reconnects - execute initialize() to restart")
+				Utils.toLogger("debug", "socketStatus - Stream Closed - Too many reconnects - execute initialize() to restart")
 			}
 			return
 			break;
 		case "send error: Socket closed":
 			closeSocket()
-			log_debug("socketStatus - Socket Closed - Attempting reconnect")
+			Utils.toLogger("debug", "socketStatus - Socket Closed - Attempting reconnect")
 			return //openSocket()
 			break;
 	}
     
-	log_debug("socketStatus - UNHANDLED socket status [${message}]")
+	Utils.toLogger("debug", "socketStatus - UNHANDLED socket status [${message}]")
 }
 
 private sendEventPublish(evt)	{
 	def var = "${evt.name + 'Publish'}"
-//	log.debug var
 	def pub = this[var]
-	if (pub)		sendEvent(name: evt.name, value: evt.value, descriptionText: evt.descriptionText, unit: evt.unit, displayed: evt.displayed);
-//	log.debug pub
+    if (pub) {
+        sendEvent(name: evt.name, value: evt.value, descriptionText: evt.descriptionText, unit: evt.unit, displayed: evt.displayed);
+    }
 }
 
 def invert(id) {
-    log_debug("invert id:${id}")
+    Utils.toLogger("debug", "invert id:${id}")
     """The Api_ID must be sent in reversed order"""
     def k1 = id[14..15]
     def k2 = id[12..13]
@@ -1437,7 +1444,7 @@ def invert(id) {
 
 def makeRequest(type, data)
 {
-    log_debug("makeRequest - type:${type} - data: ${data}")
+    Utils.toLogger("debug", "makeRequest - type:${type} - data: ${data}")
     def paramsMap = [type: type, data: data]
     return paramsMap
 }
@@ -1445,7 +1452,7 @@ def makeRequest(type, data)
 def getAPIKey() {
     if (sinopehubid != /^[0-9A-Fa-f]{16}$/)
     {
-        log_error("Neviweb Hub ID is invalid. 16 HEX characters, no spaces.")
+        Utils.toLogger("error", "Neviweb Hub ID is invalid. 16 HEX characters, no spaces.")
     }
     
     sendCommand(makeRequest("getAPIKey", byteArrayToHexString(key_request(invert(sinopehubid)))))
@@ -1453,21 +1460,37 @@ def getAPIKey() {
 
 def sendRequest(dni, paramsMap) { //data
     synchronized(mutexSendCommand) {
-        log_debug("sendRequest - login_request:${byteArrayToHexString(login_request())}")
-        sendCommand(makeRequest("sendRequestResponse", byteArrayToHexString(login_request())))
+        Utils.toLogger("debug", "sendRequest - login_request:${byteArrayToHexString(login_request())}")
+        loginRequestCommand = makeRequest("sendRequestResponse", byteArrayToHexString(login_request()))
+        if(!commandQueue.contains(loginRequestCommand))
+        {
+            sendCommand(loginRequestCommand)
+            Utils.toLogger("debug", "Added login request command to queue")
+        } else {
+            Utils.toLogger("debug", "Login request command not added, it was already added before")
+        }
+        
         sendCommand(paramsMap)
-        sendCommand(makeRequest("closeConnexion", ""))
+        
+        closeConnectionCommand = makeRequest("closeConnexion", "")
+        if(commandQueue.contains(closeConnectionCommand))
+        {
+            commandQueue.remove(closeConnectionCommand)
+            Utils.toLogger("debug", "Close connection removed, another one will be added at the end of the queue")
+        }
+        
+        sendCommand(closeConnectionCommand)
     }
 }
 
 def login_request() {
-    //log_debug("login_request")
+    //Utils.toLogger("debug", "login_request")
     if(state.APIKey == null)
     {
-        log_error("APIkey is invalid! You need to acquire the APIkey by pressing 'Get APIkey' button")
+        Utils.toLogger("error", "APIkey is invalid! You need to acquire the APIkey by pressing 'Get APIkey' button")
     }
 
-    //log_debug("state.APIKey ${state.APIKey}")
+    //Utils.toLogger("debug", "state.APIKey ${state.APIKey}")
     def login_data = "550012001001"+invert(sinopehubid)+state.APIKey
     def login_crc = hexStringToByteArray(crc_count(hexStringToByteArray(login_data)))
     return (hexStringToByteArray(login_data).toList()+login_crc.toList()) as byte[]
@@ -1480,18 +1503,18 @@ def ping_request() {
 }
 
 def crc_count(bufer) {
-    //log_debug("crc_count ${byteArrayToHexString(bufer)}")
+    //Utils.toLogger("debug", "crc_count ${byteArrayToHexString(bufer)}")
     def hexdigest = crc8Digest(bufer)
-    //log_debug("crc_count hexdigest: ${hexdigest}")
+    //Utils.toLogger("debug", "crc_count hexdigest: ${hexdigest}")
     return hexdigest;
 }
 
 def crc_check(bufer) {
-    //log_debug("crc_check ${byteArrayToHexString(bufer)}")
+    //Utils.toLogger("debug", "crc_check ${byteArrayToHexString(bufer)}")
     def hexdigest = crc8Digest(bufer)
-    //log_debug("crc_check hexdigest: ${hexdigest}")
+    //Utils.toLogger("debug", "crc_check hexdigest: ${hexdigest}")
     if(hexdigest == "00") {
-        //log_debug("crc8Digest(bufer) == 00")
+        //Utils.toLogger("debug", "crc8Digest(bufer) == 00")
         return "00"
     }
     
@@ -1541,9 +1564,9 @@ def intToHex(value) {
 
 def hexToFloatInt(hex)
 {
-    //log_debug("hexToFloatInt ${hex}")
+    //Utils.toLogger("debug", "hexToFloatInt ${hex}")
     Long i = Long.parseLong(hex, 16)
-    //log_debug("hexToFloatInt i:${i}")
+    //Utils.toLogger("debug", "hexToFloatInt i:${i}")
     return i.toInteger()
 }
 
@@ -1602,12 +1625,12 @@ def get_seq(seq) { // could be improuved
         sequence += value.toString()
     }
     sequence = "64951454" // to remove rfg
-    log_debug("sequencial number = ${sequence}")
+    Utils.toLogger("debug", "sequencial number = ${sequence}")
     return sequence
 }
 
 def count_data(data) {
-    log_debug("count_data - data is ${data}")
+    Utils.toLogger("debug", "count_data - data is ${data}")
     def size = data.length()/2 as Integer
     return byteArrayToHexString(packInt(size)[0..0] as byte[])
 }
@@ -1618,18 +1641,18 @@ def count_data_frame(data) {
 }
 
 def data_read_request(String... arg) { // command,unit_id,data_app
-    log_debug("data_read_request - arg is ${arg}")
+    Utils.toLogger("debug", "data_read_request - arg is ${arg}")
     if(arg.size() != 3) {
-        log_error("data_read_request - arg size is invalid! size: ${arg.size()}")
+        Utils.toLogger("error", "data_read_request - arg size is invalid! size: ${arg.size()}")
         return
     } else if(arg[0] == null) {
-        log_error("data_read_request - command invalid!")
+        Utils.toLogger("error", "data_read_request - command invalid!")
         return
     } else if (arg[1] == null) {
-        log_error("data_read_request - deviceID invalid!")
+        Utils.toLogger("error", "data_read_request - deviceID invalid!")
         return
     } else if (arg[2] == null) {
-        log_error("data_read_request - data_app invalid!")
+        Utils.toLogger("error", "data_read_request - data_app invalid!")
         return
     }
     
@@ -1640,123 +1663,122 @@ def data_read_request(String... arg) { // command,unit_id,data_app
     def data_res = "000000000000"
     def app_data_size = "04"
     def size = count_data_frame(arg[0]+data_seq+data_type+data_res+arg[1]+app_data_size+arg[2])
-    //log_debug("data_read_request size is ${size}")
+    //Utils.toLogger("debug", "data_read_request size is ${size}")
     def data_frame = head+size+arg[0]+data_seq+data_type+data_res+arg[1]+app_data_size+arg[2]
-    //log_debug("data_read_request data_frame is ${data_frame}")
+    //Utils.toLogger("debug", "data_read_request data_frame is ${data_frame}")
     def read_crc = hexStringToByteArray(crc_count(hexStringToByteArray(data_frame)))
-    //log_debug("data_read_request read_crc is ${byteArrayToHexString(read_crc)}")
-    //log_debug("data_read_request is ${byteArrayToHexString((hexStringToByteArray(data_frame).toList() + read_crc.toList()) as byte[])}")
+    //Utils.toLogger("debug", "data_read_request read_crc is ${byteArrayToHexString(read_crc)}")
+    //Utils.toLogger("debug", "data_read_request is ${byteArrayToHexString((hexStringToByteArray(data_frame).toList() + read_crc.toList()) as byte[])}")
     def data = byteArrayToHexString((hexStringToByteArray(data_frame).toList() + read_crc.toList()) as byte[])
     def paramsMap = makeRequest("dataRead1Response", data)
     return paramsMap
 }
 
 def data_report_request(String... arg) { // data = size+time or size+temperature (command,unit_id,data_app,data)
-    log_debug("data_report_request - arg is ${arg}")
+    Utils.toLogger("debug", "data_report_request - arg is ${arg}")
     if(arg.size() != 4) {
-        log_error("data_report_request - arg size is invalid! size: ${arg.size()}")
+        Utils.toLogger("error", "data_report_request - arg size is invalid! size: ${arg.size()}")
         return
     } else if(arg[0] == null) {
-        log_error("data_report_request - command invalid!")
+        Utils.toLogger("error", "data_report_request - command invalid!")
         return
     } else if (arg[1] == null) {
-        log_error("data_report_request - deviceID invalid!")
+        Utils.toLogger("error", "data_report_request - deviceID invalid!")
         return
     } else if (arg[2] == null) {
-        log_error("data_report_request - data_app invalid!")
+        Utils.toLogger("error", "data_report_request - data_app invalid!")
         return
     } else if (arg[3] == null) {
-        log_error("data_report_request - data invalid!")
+        Utils.toLogger("error", "data_report_request - data invalid!")
         return
     }
 
     def head = "5500"
 //    data_command = arg[0]
     def data_seq = get_seq(seq)
-    //log_debug("data_report_request data_seq is ${data_seq}")
+    //Utils.toLogger("debug", "data_report_request data_seq is ${data_seq}")
     def data_type = "00"
     def data_res = "000000000000"
     def app_data_size = count_data(arg[2]+arg[3])
-    //log_debug("data_report_request app_data_size is ${app_data_size}")
+    //Utils.toLogger("debug", "data_report_request app_data_size is ${app_data_size}")
     def size = count_data_frame(arg[0]+data_seq+data_type+data_res+arg[1]+app_data_size+arg[2]+arg[3])
-    //log_debug("data_report_request size is ${size}")
+    //Utils.toLogger("debug", "data_report_request size is ${size}")
     def data_frame = head+size+arg[0]+data_seq+data_type+data_res+arg[1]+app_data_size+arg[2]+arg[3]
-    //log_debug("data_report_request data_frame is ${data_frame}")
+    //Utils.toLogger("debug", "data_report_request data_frame is ${data_frame}")
     def read_crc = hexStringToByteArray(crc_count(hexStringToByteArray(data_frame)))
-    //log_debug("data_report_request is ${byteArrayToHexString((hexStringToByteArray(data_frame).toList() + read_crc.toList()) as byte[])}")
+    //Utils.toLogger("debug", "data_report_request is ${byteArrayToHexString((hexStringToByteArray(data_frame).toList() + read_crc.toList()) as byte[])}")
     def data = byteArrayToHexString((hexStringToByteArray(data_frame).toList() + read_crc.toList()) as byte[])
     def paramsMap = makeRequest("dataReport1Response", data)
     return paramsMap
 }
 
 def data_write_request(String... arg) { // data = size+data to send (command,unit_id,data_app,data)
-    log_debug("data_write_request - arg is ${arg}")
+    Utils.toLogger("debug", "data_write_request - arg is ${arg}")
     if(arg.size() != 4) {
-        log_error("data_write_request - arg size is invalid! size: ${arg.size()}")
+        Utils.toLogger("error", "data_write_request - arg size is invalid! size: ${arg.size()}")
         return
     } else if(arg[0] == null) {
-        log_error("data_write_request - command invalid!")
+        Utils.toLogger("error", "data_write_request - command invalid!")
         return
     } else if (arg[1] == null) {
-        log_error("data_write_request - deviceID invalid!")
+        Utils.toLogger("error", "data_write_request - deviceID invalid!")
         return
     } else if (arg[2] == null) {
-        log_error("data_write_request - data_app invalid!")
+        Utils.toLogger("error", "data_write_request - data_app invalid!")
         return
     } else if (arg[3] == null) {
-        log_error("data_write_request - data invalid!")
+        Utils.toLogger("error", "data_write_request - data invalid!")
         return
     }
     
     def head = "5500"
 //    data_command = arg[0]
     def data_seq = get_seq(seq)
-    log_debug("data_write_request data_seq is ${data_seq}")
+    Utils.toLogger("debug", "data_write_request data_seq is ${data_seq}")
     def data_type = "00"
     def data_res = "000000000000"
     def app_data_size = count_data(arg[2]+arg[3])
-    //log_debug("data_write_request app_data_size is ${app_data_size}")
+    //Utils.toLogger("debug", "data_write_request app_data_size is ${app_data_size}")
     def size = count_data_frame(arg[0]+data_seq+data_type+data_res+arg[1]+app_data_size+arg[2]+arg[3])
-    //log_debug("data_write_request size is ${size}")
+    //Utils.toLogger("debug", "data_write_request size is ${size}")
     def data_frame = head+size+arg[0]+data_seq+data_type+data_res+arg[1]+app_data_size+arg[2]+arg[3]
-    //log_debug("data_write_request data_frame is ${data_frame}")
+    //Utils.toLogger("debug", "data_write_request data_frame is ${data_frame}")
     def read_crc = hexStringToByteArray(crc_count(hexStringToByteArray(data_frame)))
-    //log_debug("data_write_request read_crc is ${byteArrayToHexString(read_crc)}")
-    //log_debug("data_write_request is ${byteArrayToHexString((hexStringToByteArray(data_frame).toList() + read_crc.toList()) as byte[])}")
+    //Utils.toLogger("debug", "data_write_request read_crc is ${byteArrayToHexString(read_crc)}")
+    //Utils.toLogger("debug", "data_write_request is ${byteArrayToHexString((hexStringToByteArray(data_frame).toList() + read_crc.toList()) as byte[])}")
     def data = byteArrayToHexString((hexStringToByteArray(data_frame).toList() + read_crc.toList()) as byte[])
     def paramsMap = makeRequest("dataWrite1Response", data)
     return paramsMap
 }
 
 //This function helps control log_debug printing
-def childGetDebugState() {
-    if (logDebug == true) return true
-    else return false
+def childGetLogLevel() {
+    Integer setLevelIdx = LOG_LEVELS.indexOf(logLevel);
+    if (setLevelIdx < 0) {
+        setLevelIdx = LOG_LEVELS.indexOf(DEFAULT_LOG_LEVEL);
+    }
+    return setLevelIdx
 }
 
-def childGetWarnState() {
-    if (logWarn == true) return true
-    else return false
-}
+/**
+ * Simple utilities for manipulation
+ */
 
-def childGetErrorState() {
-    if (logError == true) return true
-    else return false
-}
+def Utils_create() {
+    def instance = [:];
+    
+    instance.toLogger = { level, msg ->
+        if (level && msg) {
+            Integer levelIdx = LOG_LEVELS.indexOf(level);
+            Integer setLevelIdx = LOG_LEVELS.indexOf(logLevel);
+            if (setLevelIdx < 0) {
+                setLevelIdx = LOG_LEVELS.indexOf(DEFAULT_LOG_LEVEL);
+            }
+            if (levelIdx <= setLevelIdx) {
+                log."${level}" "${device.displayName} - ${msg}";
+            }
+        }
+    }
 
-def log_warn(logData)
-{
-    if (logWarn) log.warn("NeviWebHub - " + logData)
+    return instance;
 }
-
-def log_debug(logData)
-{
-    if (logDebug) log.debug("NeviWebHub - " + logData)
-}
-
-def log_error(logData) {
-	if (logError) log.error("NeviWebHub - " + logData)
-}
-
-// bytes.fromhex = hexStringToByteArray
-// bytearray(response).hex()[0:14] = response[0..13]
