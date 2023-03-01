@@ -18,6 +18,7 @@
  *  Version: 1.1 - Fixed thread issues + added options to thermostat
  *  Version: 1.2 - Added support to fahrenheit
  *  Version: 1.3 - Added better log system
+ *  Version: 1.4 - Reformatted the supportedThermostatModes and supportedThermostatFanModes JSON_OBJECT attributes so that they work properly with Hubitat 2.3.3 and later
  */
 
 /*
@@ -30,6 +31,7 @@ https://www.sinopetech.com/en/support/#api
 */
 
 import groovy.transform.Field
+import groovy.json.JsonOutput
 
 @Field Utils = Utils_create();
 @Field List<String> LOG_LEVELS = ["error", "warn", "info", "debug", "trace"]
@@ -66,7 +68,7 @@ import groovy.transform.Field
 @Field final Map temperatureSetPointsCelsius = [5.0:"5.0 C", 5.5:"5.5 C", 6.0:"6.0 C", 6.5:"6.5 C", 7.0:"7.0 C", 7.5:"7.5 C", 8.0:"8.0 C", 8.5:"8.5 C", 9:"9.0 C", 9.5:"9.5 C", 10.0:"10.0 C", 10.5:"10.5 C", 11.0:"11.0 C", 11.5:"11.5 C", 12.0:"12.0 C", 12.5:"12.5 C", 13.0:"13.0 C", 13.5:"13.5 C", 14.0:"14.0 C", 14.5:"14.5 C", 15.0:"15.0 C", 15.5:"15.5 C", 16.0:"16.0 C", 16.5:"16.5 C", 17.0:"17.0 C", 17.5:"17.5 C", 18.0:"18.0 C", 18.5:"18.5 C", 19.0:"19.0 C", 19.5:"19.5 C", 20.0:"20.0 C", 20.5:"20.5 C", 21.0:"21.0 C", 21.5:"21.5 C", 22.0:"22.0 C", 22.5:"22.5 C", 23.0:"23.0 C", 23.5:"23.5 C", 24.0:"24.0 C", 24.5:"24.5 C", 25.0:"25.0 C", 25.5:"25.5 C", 26.0:"26.0 C", 26.5:"26.5 C", 27.0:"27.0 C", 27.5:"27.5 C", 28.0:"28.0 C", 28.5:"28.5 C", 29.0:"29.0 C", 29.5:"29.5 C", 30.0:"30.0 C"]
 @Field final Map temperatureSetPointsFarenheit = [41.0:"41 F", 42.0:"42 F", 43.0:"43 F", 44.0:"44 F", 45.0:"45 F", 46.0:"46 F", 47.0:"47 F", 48.0:"48 F", 49.0:"49 F", 50.0:"50 F", 51.0:"51 F", 52.0:"52 F", 53.0:"53 F", 54.0:"54 F", 55.0:"55 F", 56.0:"56 F", 57.0:"57 F", 58.0:"58 F", 59.0:"59 F", 60.0:"60 F", 61.0:"61 F", 62.0:"62 F", 63.0:"63 F", 64.0:"64 F", 65.0:"65 F", 66.0:"66 F", 67.0:"67 F", 68.0:"68 F", 69.0:"69 F", 70.0:"70 F", 71.0:"71 F", 72.0:"72 F", 73.0:"73 F", 74.0:"74 F", 75.0:"75 F", 76.0:"76 F", 77.0:"77 F", 78.0:"78 F", 79.0:"79 F", 80.0:"80 F", 81.0:"81 F", 82.0:"82 F", 83.0:"83 F", 84.0:"84 F", 85.0:"85 F", 86.0:"86 F"]
 
-def driverVer() { return "1.3" }
+def driverVer() { return "1.4" }
 
 metadata {
 	definition (name: "Sinope Thermostat", namespace: "rferrazguimaraes", author: "Rangner Ferraz Guimaraes")
@@ -75,19 +77,21 @@ metadata {
         capability "Actuator"
         capability "Sensor"
         capability "Thermostat"
-		capability "TemperatureMeasurement"
+	capability "TemperatureMeasurement"
         capability "Polling"
-		capability "Refresh"
+	capability "Refresh"
         
-		attribute "outdoorTemp", "string"
-		attribute "heatLevel", "number"
+	attribute "outdoorTemp", "string"
+	attribute "heatLevel", "number"
         attribute "targetTemperature", "number"
         attribute "currMode", "string"
         attribute "statusText", "string"
-        
+        attribute "supportedThermostatFanModes", "JSON_OBJECT"
+	attribute "supportedThermostatModes", "JSON_OBJECT"        
+               
         command "tempUp"
         command "tempDown" 
-	}
+    }
     
     preferences {
         input name: "pollIntervals", type: "enum", title: "Set the Poll Interval.", options: pollIntervalOptions, defaultValue: "600", required: true 
@@ -106,22 +110,28 @@ metadata {
 
 def installed() {
     Utils.toLogger("debug", "installed()")
-    // Set unused default values (for Google Home Integration)
-	sendEvent(name: "thermostatMode", value: "off", isStateChange: true)
-	sendEvent(name: "thermostatFanMode", value: "auto", isStateChange: true)
-	sendEvent(name: "thermostatOperatingState", value: "idle", isStateChange: true)
-	sendEvent(name: "thermostatSetpoint", value: FormatTemperature(18, isFahrenheit()), isStateChange: true)
-	sendEvent(name: "heatingSetpoint", value: FormatTemperature(18, isFahrenheit()), isStateChange: true)
-	sendEvent(name: "coolingSetpoint", value: FormatTemperature(getMaxTemperature(), isFahrenheit()), isStateChange: true)
-    sendEvent(name: "temperature", value: FormatTemperature(20, isFahrenheit()), isStateChange: true)
-    sendEvent(name: "targetTemperature", value: FormatTemperature(20, isFahrenheit()), isStateChange: true)
-    updateDataValue("lastRunningMode", "heat")
-    updateDataValue("driverVersion", driverVer())
-    configure()
+    initialize()
 }
 
 def initialize() {
     Utils.toLogger("debug", "initialize()")
+    if (state?.lastRunningMode == null) {
+        // Set unused default values (for Google Home Integration)
+    	sendEvent(name: "thermostatMode", value: "off", isStateChange: true)
+    	sendEvent(name: "thermostatFanMode", value: "auto", isStateChange: true)
+    	sendEvent(name: "thermostatOperatingState", value: "idle", isStateChange: true)
+    	sendEvent(name: "thermostatSetpoint", value: FormatTemperature(18, isFahrenheit()), isStateChange: true)
+    	sendEvent(name: "heatingSetpoint", value: FormatTemperature(18, isFahrenheit()), isStateChange: true)
+    	sendEvent(name: "coolingSetpoint", value: FormatTemperature(getMaxTemperature(), isFahrenheit()), isStateChange: true)
+        sendEvent(name: "temperature", value: FormatTemperature(20, isFahrenheit()), isStateChange: true)
+        sendEvent(name: "targetTemperature", value: FormatTemperature(20, isFahrenheit()), isStateChange: true)
+        updateDataValue("lastRunningMode", "heat")
+        setThermostatOperatingState("idle")
+    	setSupportedThermostatFanModes(JsonOutput.toJson(["auto"]))
+    	setSupportedThermostatModes(JsonOutput.toJson(["heat", "off"]))
+	state.lastRunningMode = "heat"
+    }    
+    updateDataValue("driverVersion", driverVer())
     configure()
 }
 
@@ -228,6 +238,23 @@ def setHeatingSetpoint(Double value) {
 def setThermostatSetpoint(Double value) {
     Utils.toLogger("debug", "setThermostatSetpoint() temperature: ${value}")
     updateEvents(temperature: value, updateDevice: true)
+}
+
+def setThermostatOperatingState (operatingState) {
+	Utils.toLogger("debug", "setThermostatOperatingState (${operatingState}) was called")
+	sendEvent(name: "thermostatOperatingState", value: operatingState, displayed: false, isStateChange: true)
+}
+
+def setSupportedThermostatFanModes(fanModes) {
+	Utils.toLogger("debug", "setSupportedThermostatFanModes(${fanModes}) was called")
+	// (auto, circulate, on)
+	sendEvent(name: "supportedThermostatFanModes", value: fanModes, displayed: false, isStateChange: true)
+}
+
+def setSupportedThermostatModes(modes) {
+	Utils.toLogger("debug", "setSupportedThermostatModes(${modes}) was called")
+	// (auto, cool, emergency heat, heat, off)
+	sendEvent(name: "supportedThermostatModes", value: modes, displayed: false, isStateChange: true)
 }
 
 def getTemperatureScale() {
@@ -445,6 +472,7 @@ private updateEvents(Map args){
             break
         case "heat":
             sendEvent(name: "statusText", value: "Heating to ${temperature}°", displayed: false)
+            sendEvent(name: "thermostatOperatingState", value: "heating", displayed: false, isStateChange: true)
             sendEvent(name: "heatingSetpoint", value: temperature, displayed: false, isStateChange: true)
             sendEvent(name: "thermostatSetpoint", value: temperature, displayed: false, isStateChange: true)
             sendEvent(name: "targetTemperature", value: temperature)
