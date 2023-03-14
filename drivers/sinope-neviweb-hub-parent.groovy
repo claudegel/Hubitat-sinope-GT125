@@ -19,6 +19,7 @@
  *  Version: 1.2 - Fixed zero length response introduced by firmware 2.2.6
  *  Version: 1.3 - Fixed how the parameters are set (firmware update broke it)
  *  Version: 1.4 - Decreased the amount of overload messages (login and close connection messages), changed log system
+ *  Version: 1.5 - Major refactor to fix overloading hub error message
  */
 
 import groovy.transform.Field
@@ -32,6 +33,51 @@ import hubitat.device.Protocol
 @Field Utils = Utils_create();
 @Field List<String> LOG_LEVELS = ["error", "warn", "info", "debug", "trace"]
 @Field String DEFAULT_LOG_LEVEL = LOG_LEVELS[1]
+
+@Field final Map MESSAGE_TYPES = [
+    TEMPERATURE:         0,
+    SET_POINT:           1,
+    HEAT_LEVEL:          2,
+    MODE:                3,
+    AWAY:                4,
+    MAX_TEMP:            5,
+    MIN_TEMP:            6,
+    LOAD:                7,
+    POWER_CONNECTED:     8,
+    SECONDARY_DISPLAY:   9,
+    TIME:                10,
+    DATE:                11,
+    SUNRISE:             12,
+    SUNSET:              13,
+    LOCK:                14,
+    TEMPERATURE_FORMAT:  15,
+    TIME_FORMAT:         16,
+    EARLY_START:         17,
+    AWAY_TEMP:           18,
+    BACKLIGHT_STATE:     19,
+    BACKLIGHT_IDLE:      20,
+    OUTDOOR_TEMP:        21
+]
+
+@Field final Map UPDATE_TYPES = [
+    READ:         0,
+    WRITE:        1,
+    REPORT:       2
+]
+
+@Field final Map RESPONSE_TYPES = [
+    GET_API_KEY:      0,
+    ADD_THERMOSTAT:   1,
+    SEND_REQUEST:     2,
+    DATA_WRITE_1:     3,
+    DATA_WRITE_2:     4,
+    DATA_READ_1:      5,
+    DATA_READ_2:      6,
+    DATA_REPORT_1:    7,
+    DATA_REPORT_2:    8,
+    LOGIN_REQUEST:    9,
+    CLOSE_CONNECTION: 10
+]
 
 @Field final static String all_unit = "FFFFFFFF"
 //sequential number to identify the current request. Could be any unique number that is different at each request
@@ -130,7 +176,7 @@ import hubitat.device.Protocol
 @Field static int queueSize = 0
 @Field static int socketErrors = 0
 
-def driverVer() { return "1.4" }
+def driverVer() { return "1.5" }
 
 metadata {
     definition(name: "Sinope Neviweb Hub", namespace: "rferrazguimaraes", author: "Rangner Ferraz Guimaraes") {
@@ -209,7 +255,7 @@ def removeAllThermostats() {
             try {
                 deleteChildDevice(it.deviceNetworkId)
             } catch (e) {
-                Utils.toLogger("debug", "Error deleting ${it.deviceNetworkId}, probably locked into a SmartApp: ${e}")
+                Utils.toLogger("error", "Error deleting ${it.deviceNetworkId}, probably locked into a SmartApp: ${e}")
             }
         }
     } catch (err) {
@@ -230,14 +276,14 @@ def childRequestingRefresh(String dni) {
     def deviceID = getDeviceIDfromDNI(dni)
     Utils.toLogger("debug", "Requesting refreshed info for ${dni}")
     
+    sendRequest(self, data_read_request(data_read_command, deviceID, data_mode))
     sendRequest(self, data_read_request(data_read_command, deviceID, data_temperature))
     sendRequest(self, data_read_request(data_read_command, deviceID, data_setpoint))
     sendRequest(self, data_read_request(data_read_command, deviceID, data_heat_level))
     sendRequest(self, data_read_request(data_read_command, deviceID, data_away))
-    sendRequest(self, data_read_request(data_read_command, deviceID, data_max_temp))
     sendRequest(self, data_read_request(data_read_command, deviceID, data_min_temp))
+    sendRequest(self, data_read_request(data_read_command, deviceID, data_max_temp))
     sendRequest(self, data_read_request(data_read_command, deviceID, data_load))
-    sendRequest(self, data_read_request(data_read_command, deviceID, data_mode))
 }
 
 def dailyReport() {
@@ -273,8 +319,8 @@ def get_climate_device_info(String dni) {
     // send requests
     try{
         def deviceID = getDeviceIDfromDNI(dni)
-        sendRequest(self, data_read_request(data_read_command, deviceID, data_max_temp))
         sendRequest(self, data_read_request(data_read_command, deviceID, data_min_temp))
+        sendRequest(self, data_read_request(data_read_command, deviceID, data_max_temp))
         sendRequest(self, data_read_request(data_read_command, deviceID, data_load))
         sendRequest(self, data_read_request(data_read_command, deviceID, data_power_connected))
     } catch(e) {
@@ -360,7 +406,7 @@ def get_mode(data) {
     def deviceID = data[26..33]
     def status = data[20..21]
     if (status != "0A") {
-        Utils.toLogger("debug", "Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
+        Utils.toLogger("error", "Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
         return None // device didn't answer, wrong device
     } else {
         def tc2 = data[46..47]
@@ -395,7 +441,7 @@ def set_away_mode(String dni, away) {
             sendRequest(dni, data_write_request(data_write_command, deviceID, data_away, set_away(away)))
         }
     } catch(e) {
-        Utils.toLogger("debug", "Cannot set device away")
+        Utils.toLogger("error", "Cannot set device away")
     } 
 }
 
@@ -403,10 +449,8 @@ def set_all_away(self, away) {
     //Set all devices to away mode 0=home, 2=away
     try {
         sendRequest(self, data_report_request(data_report_command, all_unit, data_away, set_away(away)))
-    }
-    catch (e)
-    {
-        Utils.toLogger("debug", "Cannot set all devices to away or home mode: ${e}")
+    } catch (e) {
+        Utils.toLogger("error", "Cannot set all devices to away or home mode: ${e}")
     }
 }
 
@@ -415,7 +459,7 @@ def get_light_state(data) {
     def deviceID = data[26..33]
     def status = data[20..21]
     if (status != "0A") {
-        Utils.toLogger("debug", "get_light_state - Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
+        Utils.toLogger("error", "get_light_state - Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
         return None // device didn't answer, wrong device
     } else {
         def tc2 = data[46..47]
@@ -432,7 +476,7 @@ def get_light_idle(data) {
     def deviceID = data[26..33]
     def status = data[20..21]
     if (status != "0A") {
-        Utils.toLogger("debug", "get_light_idle - Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
+        Utils.toLogger("error", "get_light_idle - Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
         return None // device didn't answer, wrong device
     } else {
         def tc2 = data[46..47]
@@ -449,10 +493,8 @@ def set_backlight_state(String dni, state) {
     try {
         def deviceID = getDeviceIDfromDNI(dni)
         sendRequest(self, data_write_request(data_write_command, deviceID, data_backlight, set_light_state(state)))
-    }
-    catch (e)
-    {
-        Utils.toLogger("debug", "Cannot change backlight device state: ${e}")
+    } catch (e) {
+        Utils.toLogger("error", "Cannot change backlight device state: ${e}")
     }
 }
 
@@ -461,10 +503,8 @@ def set_backlight_idle(String dni, level) {
     try {
         def deviceID = getDeviceIDfromDNI(dni)
         sendRequest(self, data_write_request(data_write_command, deviceID, data_backlight_idle, set_light_idle(level)))
-    }
-    catch (e)
-    {
-        Utils.toLogger("debug", "Cannot change device backlight level: ${e}")
+    } catch (e) {
+        Utils.toLogger("error", "Cannot change device backlight level: ${e}")
     }
 }
 
@@ -473,7 +513,7 @@ def get_lock(data) {
     def deviceID = data[26..33]
     def status = data[20..21]
     if (status != "0A") {
-        Utils.toLogger("debug", "get_lock - Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
+        Utils.toLogger("error", "get_lock - Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
         return None // device didn't answer, wrong device
     } else {
         def tc2 = data[46..47]
@@ -490,9 +530,7 @@ def set_keyboard_lock(String dni, lock) {
     try {
         def deviceID = getDeviceIDfromDNI(dni)
         sendRequest(dni, data_write_request(data_write_command, deviceID, data_lock, set_lock(lock)))
-    }
-    catch (e)
-    {
+    } catch (e) {
         Utils.toLogger("error", "Cannot change lock device state: ${e}")
     }
 }
@@ -502,7 +540,7 @@ def get_secondary_display(data) {
     def deviceID = data[26..33]
     def status = data[20..21]
     if (status != "0A") {
-        Utils.toLogger("debug", "get_secondary_display - Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
+        Utils.toLogger("error", "get_secondary_display - Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
         return None // device didn't answer, wrong device
     } else {
         def tc2 = data[46..47]
@@ -519,9 +557,7 @@ def set_secondary_display(String dni, display) {
     try {
         def deviceID = getDeviceIDfromDNI(dni)
         sendRequest(dni, data_write_request(data_write_command, deviceID, data_secondary_display, set_secondary_display(display)))
-    }
-    catch (e)
-    {
+    } catch (e) {
         Utils.toLogger("error", "Cannot change secondary display: ${e}")
     }
 }
@@ -531,7 +567,7 @@ def get_temperature_format(data) {
     def deviceID = data[26..33]
     def status = data[20..21]
     if (status != "0A") {
-        Utils.toLogger("debug", "get_temperature_format - Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
+        Utils.toLogger("error", "get_temperature_format - Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
         return None // device didn't answer, wrong device
     } else {
         def tc2 = data[46..47]
@@ -548,9 +584,7 @@ def set_temperature_format(String dni, temperatureFormat) {
     try {
         def deviceID = getDeviceIDfromDNI(dni)
         sendRequest(dni, data_write_request(data_write_command, deviceID, data_temperature_format, set_temperature_format(temperatureFormat)))
-    }
-    catch (e)
-    {
+    } catch (e) {
         Utils.toLogger("error", "Cannot change temperature format: ${e}")
     }
 }
@@ -560,7 +594,7 @@ def get_time_format(data) {
     def deviceID = data[26..33]
     def status = data[20..21]
     if (status != "0A") {
-        Utils.toLogger("debug", "get_time_format - Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
+        Utils.toLogger("error", "get_time_format - Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
         return None // device didn't answer, wrong device
     } else {
         def tc2 = data[46..47]
@@ -577,9 +611,7 @@ def set_time_format(String dni, timeFormat) {
     try {
         def deviceID = getDeviceIDfromDNI(dni)
         sendRequest(dni, data_write_request(data_write_command, deviceID, data_time_format, set_time_format(timeFormat)))
-    }
-    catch (e)
-    {
+    } catch (e) {
         Utils.toLogger("error", "Cannot change time format: ${e}")
     }
 }
@@ -589,7 +621,7 @@ def get_early_start(data) {
     def deviceID = data[26..33]
     def status = data[20..21]
     if (status != "0A") {
-        Utils.toLogger("debug", "get_early_start - Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
+        Utils.toLogger("error", "get_early_start - Status code: ${status} (Wrong answer for: ${deviceID}) Data:(${data})")
         return None // device didn't answer, wrong device
     } else {
         def tc2 = data[46..47]
@@ -606,9 +638,7 @@ def set_early_start(dni, isEnable) {
     try {
         def deviceID = getDeviceIDfromDNI(dni)
         sendRequest(dni, data_write_request(data_write_command, deviceID, data_early_start, set_early_start(isEnable)))
-    }
-    catch (e)
-    {
+    } catch (e) {
         Utils.toLogger("error", "Cannot change time format: ${e}")
     }
 }
@@ -617,9 +647,7 @@ def set_min_setpoint(dni, temperature) {
     try {
         def deviceID = getDeviceIDfromDNI(dni)
         sendRequest(dni, data_write_request(data_write_command, deviceID, data_min_temp, set_temperature(temperature)))
-    }
-    catch (e)
-    {
+    } catch (e) {
         Utils.toLogger("error", "Cannot set min temperature setpoint ${e}")
     }
 }
@@ -628,9 +656,7 @@ def set_max_setpoint(dni, temperature) {
     try {
         def deviceID = getDeviceIDfromDNI(dni)
         sendRequest(dni, data_write_request(data_write_command, deviceID, data_max_temp, set_temperature(temperature)))
-    }
-    catch (e)
-    {
+    } catch (e) {
         Utils.toLogger("error", "Cannot set max temperature setpoint ${e}")
     }
 }
@@ -639,9 +665,7 @@ def set_away_setpoint(dni, temperature) {
     try {
         def deviceID = getDeviceIDfromDNI(dni)
         sendRequest(dni, data_write_request(data_write_command, deviceID, data_away_temp, set_temperature(temperature)))
-    }
-    catch (e)
-    {
+    } catch (e) {
         Utils.toLogger("error", "Cannot set away temperature setpoint ${e}")
     }
 }
@@ -654,10 +678,8 @@ def set_daily_report(self) {
         sendRequest(self, data_report_request(data_report_command, all_unit, data_date, set_date(tz)))
         sendRequest(self, data_report_request(data_report_command, all_unit, data_sunrise, set_sun_time(tz, "sunrise")))
         sendRequest(self, data_report_request(data_report_command, all_unit, data_sunset, set_sun_time(tz, "sunset")))
-    }
-    catch (e)
-    {
-        Utils.toLogger("debug", "Cannot send daily report to each devices: ${e}")
+    } catch (e) {
+        Utils.toLogger("error", "Cannot send daily report to each devices: ${e}")
     }
 }
 
@@ -667,10 +689,8 @@ def set_hourly_report(self, device_id, outside_temperature) {
     try {
         sendRequest(self, data_write_request(data_write_command, device_id, data_secondary_display, put_mode(1)))
         sendRequest(self, data_report_request(data_report_command, device_id, data_outdoor_temperature, set_temperature(outside_temperature)))
-    }
-    catch (e)
-    {
-        Utils.toLogger("debug", "Cannot send outside temperature report to each devices: ${e}")
+    } catch (e) {
+        Utils.toLogger("error", "Cannot send outside temperature report to each devices: ${e}")
     }
 }
 
@@ -766,7 +786,7 @@ def send_time(dni) {
         def tz = location.timeZone
         sendRequest(dni, data_write_request(data_write_command, deviceID, data_time, set_time(tz)))
     } catch(e) {
-        Utils.toLogger("debug", "Cannot send current time to device")
+        Utils.toLogger("error", "Cannot send current time to device")
     }
 }
  
@@ -781,7 +801,7 @@ def set_mode(dni, device_type, mode) {
             sendRequest(dni, data_write_request(data_write_command, deviceID, data_light_mode, put_mode(mode)))
         }
     } catch(e) {
-        Utils.toLogger("debug", "Cannot set device operation mode")
+        Utils.toLogger("error", "Cannot set device operation mode")
     }
 }
 
@@ -794,7 +814,7 @@ def get_result(data) { // check if data write was successfull, return True or Fa
     } else if (tc2.toString() =="01") { //data report
         return True
     } else {
-        Utils.toLogger("debug", "Status code: ${tc2} (Wrong answer ? ${deviceID}) ${data}")
+        Utils.toLogger("error", "Status code: ${tc2} (Wrong answer ? ${deviceID}) ${data}")
     }
     return False
 }
@@ -813,12 +833,9 @@ def parse(response) {
     {
         // Length is max so concatenate together
         def concatStr = getDataValue("fullMessage")
-        if (concatStr == null)
-        {
+        if (concatStr == null) {
 		    concatStr = response
-        }
-        else
-        {
+        } else {
             concatStr = concatStr + response
         }
         device.updateDataValue("fullMessage", concatStr)
@@ -827,12 +844,9 @@ def parse(response) {
     {
 		// Length less than max so concatenate with previous if required, and then process
 		def concatStr = getDataValue("fullMessage")
-        if (concatStr == null)
-        {
+        if (concatStr == null) {
 		    concatStr = response
-        }
-        else
-        {
+        } else {
             concatStr = concatStr + response
             device.updateDataValue("fullMessage", "")
         }
@@ -845,78 +859,63 @@ def processResponse(response)
     resetCloseSocketTimer()
     unschedule(runAllActions5Sec)
     schedule("0/1 * * * * ?", runAllActions1Sec)
-    def typeName = device.getDataValue("type")
-    Utils.toLogger("debug", "Processing response to " + typeName)
+    def responseType = device.getDataValue("responseType") as Integer
+    Utils.toLogger("debug", "Processing response to ${responseType}")
 
-    if (typeName == "getAPIKey")
-    {
-        Utils.toLogger("debug", "received getAPIKey command state.APIKey before: ${state.APIKey}")
-        state.APIKey = retreive_key(response)[0..15]
-        Utils.toLogger("debug", "state.APIKey after: ${state.APIKey}")
-        if (sinopehubapikey == "0000000000000000") // isso está errado 0..15 da menos que esse valor
-        {
-             Utils.toLogger("info", "API Key request failed. Check your Neviweb Hub ID")
-            state.APIKey = null
-        }
-        else
-        {
-            Utils.toLogger("info", "API Key saved: ${state.APIKey}")
-        }
-    }
-    else if (typeName == "addThermostat")
-    {
-        Utils.toLogger("debug", "received addThermostat command response: ${response}")
-        def deviceID = response[14..21]
-        Utils.toLogger("debug", "deviceID: ${deviceID}")
+    switch(responseType) {
+        case RESPONSE_TYPES.GET_API_KEY:
+            Utils.toLogger("debug", "received getAPIKey command state.APIKey before: ${state.APIKey}")
+            state.APIKey = retreive_key(response)[0..15]
+            Utils.toLogger("debug", "state.APIKey after: ${state.APIKey}")
+            if (sinopehubapikey == "0000000000000000") {
+                Utils.toLogger("info", "API Key request failed. Check your Neviweb Hub ID")
+                state.APIKey = null
+            } else {
+                Utils.toLogger("info", "API Key saved: ${state.APIKey}")
+            }
+        break
+        case RESPONSE_TYPES.ADD_THERMOSTAT:
+            Utils.toLogger("debug", "received addThermostat command response: ${response}")
+            def deviceID = response[14..21]
+            Utils.toLogger("debug", "deviceID: ${deviceID}")
 
-        //Prepare Thermostat name - prepend and postpend of settings if they exist
-        def thisthermostatname = "Sinope Thermostat" //+ deviceID
+            //Prepare Thermostat name - prepend and postpend of settings if they exist
+            def thisthermostatname = "Sinope Thermostat" //+ deviceID
 
-        //Prepare DNI - Remove spaces and replace with a hyphen to prevent problems with HTML requests
-        def thisthermostatdni = "${deviceID}" //item.key.replaceAll(" ", "+")
+            //Prepare DNI - Remove spaces and replace with a hyphen to prevent problems with HTML requests
+            def thisthermostatdni = "${deviceID}" //item.key.replaceAll(" ", "+")
 
-        Utils.toLogger("debug", "Adding child Name: ${thisthermostatname}, DNI: ${thisthermostatdni}, Stat ID: ${deviceID} to Hub: ${device.hub.id}")
-        try
-        {
-            addChildDevice("rferrazguimaraes", "Sinope Thermostat", thisthermostatdni, [name: thisthermostatname, isComponent: false])
-        }
-        catch (e)
-        {
-            Utils.toLogger("debug", "Couldnt add device, probably already exists: ${e}")
-        }
-
-    }
-    else if (typeName == "sendRequestResponse")
-    {
-        sendRequestResponse(response)
-    }    
-    else if (typeName == "dataWrite1Response")
-    {
-        analyseDataResponse(response)
-    }        
-    else if (typeName == "dataWrite2Response")
-    {
-        updateChild("write", response)
-    }
-    else if (typeName == "dataRead1Response")
-    {
-        analyseDataResponse(response)
-    }        
-    else if (typeName == "dataRead2Response")
-    {
-        updateChild("read", response)
-    }
-    else if (typeName == "dataReport1Response")
-    {
-        analyseDataResponse(response)
-    }        
-    else if (typeName == "dataReport2Response")
-    {
-        updateChild("report", response)
-    }
-    else
-    {
-        Utils.toLogger("error", "Unknown source of response")
+            Utils.toLogger("debug", "Adding child Name: ${thisthermostatname}, DNI: ${thisthermostatdni}, Stat ID: ${deviceID} to Hub: ${device.hub.id}")
+            try {
+                addChildDevice("rferrazguimaraes", "Sinope Thermostat", thisthermostatdni, [name: thisthermostatname, isComponent: false])
+            } catch (e) {
+                Utils.toLogger("error", "Couldnt add device, probably already exists: ${e}")
+            }
+        break
+        case RESPONSE_TYPES.SEND_REQUEST:
+            sendRequestResponse(response)
+        break
+        case RESPONSE_TYPES.DATA_WRITE_1:
+            analyseDataResponse(response)
+        break
+        case RESPONSE_TYPES.DATA_WRITE_2:
+            updateChild(UPDATE_TYPES.WRITE, response)
+        break
+        case RESPONSE_TYPES.DATA_READ_1:
+            analyseDataResponse(response)
+        break
+        case RESPONSE_TYPES.DATA_READ_2:
+            updateChild(UPDATE_TYPES.READ, response)
+        break
+        case RESPONSE_TYPES.DATA_REPORT_1:
+            analyseDataResponse(response)
+        break
+        case RESPONSE_TYPES.DATA_REPORT_2:
+            updateChild(UPDATE_TYPES.REPORT, response)
+        break
+        default:
+            Utils.toLogger("error", "Unknown source of response")
+        break
     }
 }
 
@@ -932,12 +931,9 @@ def sendRequestResponse(response) {
     Utils.toLogger("debug", "received sendRequestResponse command response: ${response}")
     def status = response[0..13]
     Utils.toLogger("debug", "status is ${status}")
-    if (status == "55000C001101FF")
-    {
-        Utils.toLogger("debug", "Login fail, please check your APIKey")
-    }
-    else // 55000C00110100 - Login ok
-    {
+    if (status == "55000C001101FF") {
+        Utils.toLogger("error", "Login fail, please check your APIKey")
+    } else { // 55000C00110100 - Login ok
         Utils.toLogger("debug", "Login ok !")
     }
 }
@@ -949,7 +945,7 @@ def analyseDataResponse(response) {
         Utils.toLogger("debug", "Reply et longueur du data = ${hexStringToByteArray(response).size()} - ${response}")
         def deviceID = response[26..33]
         Utils.toLogger("debug", "deviceID: ${deviceID}")
-        def typeName = device.getDataValue("type")
+        def responseType = device.getDataValue("responseType") as Integer
         if (hexStringToByteArray(response).size() == 19) {
             Utils.toLogger("debug", "hexStringToByteArray(response).size() == 19")
             def seq_num = response[12..19] //sequence id to link response to the correct request
@@ -962,17 +958,12 @@ def analyseDataResponse(response) {
                 Utils.toLogger("debug", "request status = ok for read and write")
                 if (more == "01") { //GT125 is sending another data response
                     Utils.toLogger("debug", "analyseDataResponse - GT125 is sending another data response")
-                    if(typeName == "dataRead1Response")
-                    {
-                        device.updateDataValue("type", "dataRead2Response")
-                    }
-                    else if(typeName == "dataReport1Response")
-                    {
-                        device.updateDataValue("type", "dataReport2Response")
-                    }
-                    else
-                    {
-                        device.updateDataValue("type", "dataWrite2Response")
+                    if(responseType == RESPONSE_TYPES.DATA_READ_1) {
+                        device.updateDataValue("responseType", "${RESPONSE_TYPES.DATA_READ_2}")
+                    } else if(responseType == RESPONSE_TYPES.DATA_REPORT_1) {
+                        device.updateDataValue("responseType", "${RESPONSE_TYPES.DATA_REPORT_2}")
+                    } else {
+                        device.updateDataValue("responseType", "${RESPONSE_TYPES.DATA_WRITE_2}")
                     }
                 } else {
                     Utils.toLogger("debug", "No more response...")
@@ -981,17 +972,12 @@ def analyseDataResponse(response) {
                 }
             } else if (status == "01") { //status ok for data report
                 Utils.toLogger("debug", "status ok for data report")
-                if(typeName == "dataRead1Response")
-                {
-                    updateChild("read", response)
-                }
-                else if(typeName == "dataReport1Response")
-                {
-                    updateChild("report", response)
-                }
-                else
-                {
-                    updateChild("write", response)
+                if(responseType == RESPONSE_TYPES.DATA_READ_1) {
+                    updateChild(UPDATE_TYPES.READ, response)
+                } else if(responseType == RESPONSE_TYPES.DATA_REPORT_1) {
+                    updateChild(UPDATE_TYPES.REPORT, response)
+                } else {
+                    updateChild(UPDATE_TYPES.WRITE, response)
                 }
                 //closeSocket()
                 //return response
@@ -1014,17 +1000,12 @@ def analyseDataResponse(response) {
                     Utils.toLogger("debug", "analyseDataResponse - Request queued for device ${deviceID}, waiting...")
                 } else if (state == "0A") { //we got an answer
                     Utils.toLogger("debug", "we got an answer: ${datarec}")
-                    if(typeName == "dataRead1Response")
-                    {
-                        updateChild("read", datarec)
-                    }
-                    else if(typeName == "dataReport1Response")
-                    {
-                        updateChild("report", datarec)
-                    }
-                    else
-                    {
-                        updateChild("write", response)
+                    if(responseType == RESPONSE_TYPES.DATA_READ_1) {
+                        updateChild(UPDATE_TYPES.READ, datarec)
+                    } else if(responseType == RESPONSE_TYPES.DATA_REPORT_1) {
+                        updateChild(UPDATE_TYPES.REPORT, datarec)
+                    } else {
+                        updateChild(UPDATE_TYPES.WRITE, response)
                     }
                     //return datarec
                 } else if (state == "0B") { // we receive a push notification
@@ -1053,7 +1034,7 @@ def analyseDataResponse(response) {
 def updateChild(updateType, response) {       
     
     Utils.toLogger("debug", "received updateChild command ${updateType} response: ${response}") 
-    def canUpdateChild = updateType == "report"
+    def canUpdateChild = updateType == UPDATE_TYPES.REPORT
     def deviceID = response[26..33]
     if(!canUpdateChild)
     {
@@ -1072,7 +1053,7 @@ def updateChild(updateType, response) {
             canUpdateChild = true
             //break
         } else if (state == "0B") { // we receive a push notification
-            Utils.toLogger("debug", "!!!!!!!!!!!!we receive a push notification")
+            Utils.toLogger("debug", "we receive a push notification")
             get_data_push(response)
         } else {
             Utils.toLogger("error", "updateChild - Bad answer received, data: ${response}")//, binascii.hexlify(datarec))
@@ -1090,10 +1071,8 @@ def updateChild(updateType, response) {
                 {
                     sendInfoChild(updateType, response, resultDevice.deviceNetworkId, resultDevice)
                 }
-            }
-            catch (e)
-            {
-                Utils.toLogger("debug", "Couldnt process response, probably this child doesnt exist: ${e} in all_unit")
+            } catch (e) {
+                Utils.toLogger("error", "Couldnt process response, probably this child doesnt exist: ${e} in all_unit")
             }
         }
         else
@@ -1102,108 +1081,116 @@ def updateChild(updateType, response) {
                 def resultDevice = getChildDevices().find {
                     it.deviceNetworkId == deviceID
                 }
+                
                 sendInfoChild(updateType, response, deviceID, resultDevice)
-            }
-            catch (e)
-            {
-                Utils.toLogger("debug", "Couldnt process response, probably this child doesnt exist: ${e}")
+            } catch (e) {
+                Utils.toLogger("error", "Couldnt process response, probably this child doesnt exist: ${e}")
             }
         }
     }
 }
 
+def keyForValue(map, value) {
+    map.find { it.value == value }?.key
+}
+
 def sendInfoChild(updateType, response, deviceID, resultDevice)
 {
-    log_debug("sendInfoChild - Sending response ${response} to ${deviceID} resultDevice: ${resultDevice} updateType: ${updateType}")
+    Utils.toLogger("debug", "sendInfoChild - Sending response ${response} to ${deviceID} resultDevice: ${resultDevice} updateType: ${updateType}")
+
+    if(deviceID != resultDevice.deviceNetworkId) {                    
+        Utils.toLogger("error", "Device ID is different - deviceID: ${deviceID} - resultDevice.deviceNetworkId: ${resultDevice.deviceNetworkId}")
+    }    
+    
     if(resultDevice != null) {
-        //log_debug("!!!!!Sending response to ${deviceID} resultdevice: ${resultDevice}")
-        if(updateType != "report")
+        //Utils.toLogger("debug", "!!!!!Sending response to ${deviceID} resultdevice: ${resultDevice}")
+        if(updateType != UPDATE_TYPES.REPORT)
         {
             def commandType = response[36..43]
             switch(commandType) {
                 case data_temperature:
                     def temperature = get_temperature(response)
-                    resultDevice.processChildResponse([updateType: updateType, type: "temperature", value: temperature])
+                    resultDevice.processChildResponse([device: deviceID, type: MESSAGE_TYPES.TEMPERATURE, value: temperature])
                 break
                 case data_setpoint:
                     def setPoint = get_temperature(response)
-                    resultDevice.processChildResponse([updateType: updateType, type: "set_point", value: setPoint])
+                    resultDevice.processChildResponse([device: deviceID, type: MESSAGE_TYPES.SET_POINT, value: setPoint])
                 break
                 case data_heat_level:
                     def heatLevel = get_heat_level(response)
-                    resultDevice.processChildResponse([updateType: updateType, type: "heat_level", value: heatLevel])
+                    resultDevice.processChildResponse([device: deviceID, type: MESSAGE_TYPES.HEAT_LEVEL, value: heatLevel])
                 break
                 case data_mode:
                     def mode = get_mode(response)
-                    resultDevice.processChildResponse([updateType: updateType, type: "mode", value: mode])
+                    resultDevice.processChildResponse([device: deviceID, type: MESSAGE_TYPES.MODE, value: mode])
                 break
                 case data_away:
                     def away = get_away(response)
-                    resultDevice.processChildResponse([updateType: updateType, type: "away", value: away])
+                    resultDevice.processChildResponse([device: deviceID, type: MESSAGE_TYPES.AWAY, value: away])
                 break
                 case data_max_temp:
                     def tempMax = get_temperature(response)
-                    resultDevice.processChildResponse([updateType: updateType, type: "max_temp", value: tempMax])
+                    resultDevice.processChildResponse([device: deviceID, type: MESSAGE_TYPES.MAX_TEMP, value: tempMax])
                 break
                 case data_min_temp:
                     def tempMin = get_temperature(response)
-                    resultDevice.processChildResponse([updateType: updateType, type: "min_temp", value: tempMin])
+                    resultDevice.processChildResponse([device: deviceID, type: MESSAGE_TYPES.MIN_TEMP, value: tempMin])
                 break        
                 case data_load:
                     def wattLoad = get_power_load(response)
-                    resultDevice.processChildResponse([updateType: updateType, type: "load", value: wattLoad])
+                    resultDevice.processChildResponse([device: deviceID, type: MESSAGE_TYPES.LOAD, value: wattLoad])
                 break
                 case data_power_connected:
                     def wattOveride = get_power_load(response)
-                    resultDevice.processChildResponse([updateType: updateType, type: "power_connected", value: wattOveride])
+                    resultDevice.processChildResponse([device: deviceID, type: MESSAGE_TYPES.POWER_CONNECTED, value: wattOveride])
                 break
                 case data_secondary_display:
                     def secondaryDisplay = get_secondary_display(response)
-                    resultDevice.processChildResponse([updateType: updateType, type: "secondary_display", value: secondaryDisplay])
+                    resultDevice.processChildResponse([device: deviceID, type: MESSAGE_TYPES.SECONDARY_DISPLAY, value: secondaryDisplay])
                 break
                 case data_time:
                     def outdoorTemp = get_temperature(response)
-                    resultDevice.processChildResponse([updateType: updateType, type: "time", value: outdoorTemp])
+                    resultDevice.processChildResponse([device: deviceID, type: MESSAGE_TYPES.TIME, value: outdoorTemp])
                 break
                 case data_date:
                     def outdoorTemp = get_temperature(response)
-                    resultDevice.processChildResponse([updateType: updateType, type: "date", value: outdoorTemp])
+                    resultDevice.processChildResponse([device: deviceID, type: MESSAGE_TYPES.DATE, value: outdoorTemp])
                 break
                 case data_sunrise:
                     def outdoorTemp = get_temperature(response)
-                    resultDevice.processChildResponse([updateType: updateType, type: "sunrise", value: outdoorTemp])
+                    resultDevice.processChildResponse([device: deviceID, type: MESSAGE_TYPES.SUNRISE, value: outdoorTemp])
                 break
                 case data_sunset:
                     def outdoorTemp = get_temperature(response)
-                    resultDevice.processChildResponse([updateType: updateType, type: "sunset", value: outdoorTemp])
+                    resultDevice.processChildResponse([device: deviceID, type: MESSAGE_TYPES.SUNSET, value: outdoorTemp])
                 break
                 case data_lock:
                     def lock = get_lock(response)
-                    resultDevice.processChildResponse([updateType: updateType, type: "lock", value: lock])
+                    resultDevice.processChildResponse([device: deviceID, type: MESSAGE_TYPES.LOCK, value: lock])
                 break
                 case data_temperature_format:
                     def displayFormat = get_temperature_format(response)
-                    resultDevice.processChildResponse([updateType: updateType, type: "temperature_format", value: displayFormat])
+                    resultDevice.processChildResponse([device: deviceID, type: MESSAGE_TYPES.TEMPERATURE_FORMAT, value: displayFormat])
                 break
                 case data_time_format:
                     def timeFormat = get_time_format(response)
-                    resultDevice.processChildResponse([updateType: updateType, type: "time_format", value: timeFormat])
+                    resultDevice.processChildResponse([device: deviceID, type: MESSAGE_TYPES.TIME_FORMAT, value: timeFormat])
                 break
                 case data_early_start:
                     def earlyStart = get_early_start(response)
-                    resultDevice.processChildResponse([updateType: updateType, type: "early_start", value: earlyStart])
+                    resultDevice.processChildResponse([device: deviceID, type: MESSAGE_TYPES.EARLY_START, value: earlyStart])
                 break
                 case data_away_temp:
                     def awayTemp = get_temperature(response)
-                    resultDevice.processChildResponse([updateType: updateType, type: "away_temp", value: awayTemp])
+                    resultDevice.processChildResponse([device: deviceID, type: MESSAGE_TYPES.AWAY_TEMP, value: awayTemp])
                 break
                 case data_backlight:
                     def backlightState = get_light_state(response)
-                    resultDevice.processChildResponse([updateType: updateType, type: "backlight_state", value: backlightState])
+                    resultDevice.processChildResponse([device: deviceID, type: MESSAGE_TYPES.BACKLIGHT_STATE, value: backlightState])
                 break
                 case data_backlight_idle:
                     def backlightIdle = get_light_idle(response)
-                    resultDevice.processChildResponse([updateType: updateType, type: "backlight_idle", value: backlightIdle])
+                    resultDevice.processChildResponse([device: deviceID, type: MESSAGE_TYPES.BACKLIGHT_IDLE, value: backlightIdle])
                 break
                 default:
                     Utils.toLogger("error", "updateChild - Command ${commandType} not found!")
@@ -1211,7 +1198,7 @@ def sendInfoChild(updateType, response, deviceID, resultDevice)
             }
         }
     } else {
-        Utils.toLogger("debug", "Couldnt process response, probably this child doesnt exist - deviceID: ${deviceID}")
+        Utils.toLogger("error", "Couldnt process response, probably this child doesnt exist - deviceID: ${deviceID}")
     }
 }
 
@@ -1263,10 +1250,8 @@ def runAllActions5Sec()
 def runAllActions()
 {
     def Integer waitTime = 30000
-    if (mutex.tryAcquire(waitTime,TimeUnit.MILLISECONDS))
-    {
-        if (commandQueue.size() > 0)
-        {
+    if (mutex.tryAcquire(waitTime, TimeUnit.MILLISECONDS)) {
+        if (commandQueue.size() > 0) {
             Utils.toLogger("debug", "poolCommand canSendCommand")
 
             if(openSocket()) { 
@@ -1274,36 +1259,32 @@ def runAllActions()
                     Utils.toLogger("debug", "poolCommand sendSocketMessage commandQueue size: ${commandQueue.size()}")
                     def paramsMap = commandQueue.poll()
 
-                    if(paramsMap != null)
-                    {
-                        device.updateDataValue("type", paramsMap.type)
+                    if(paramsMap != null) {
+                        device.updateDataValue("responseType", "${paramsMap.type}")
 
-                        if(paramsMap.type == "getAPIKey")
-                        {
-                            Utils.toLogger("info", "Press 'Web' button on hub")
-                        }
-                        else if(paramsMap.type == "addThermostat")
-                        {
-                            Utils.toLogger("info", "Press the two buttons on the thermostat")
-                        } 
-                        else if(paramsMap.type == "login_request")
-                        {
-                            Utils.toLogger("info", "login request ${paramsMap.data}")
-                        }
-                        else if(paramsMap.type == "closeConnexion")
-                        {
-                            closeSocket()
+                        switch(paramsMap.type) {
+                            case RESPONSE_TYPES.GET_API_KEY:
+                                Utils.toLogger("info", "Press 'Web' button on hub")
+                            break
+                            case RESPONSE_TYPES.ADD_THERMOSTAT:
+                                Utils.toLogger("info", "Press the two buttons on the thermostat")
+                            break
+                            case RESPONSE_TYPES.LOGIN_REQUEST:
+                                Utils.toLogger("info", "login request ${paramsMap.data}")
+                            break
+                            case RESPONSE_TYPES.CLOSE_CONNECTION:
+                                closeSocket()
+                            break
                         }
 
-                        if(paramsMap.data != "")
-                        {                        
+                        if(paramsMap.data != "") {                        
                             InterfaceUtils.sendSocketMessage(device, paramsMap.data)
                             resetCloseSocketTimer()
                             unschedule(runAllActions1Sec)
                             schedule("0/5 * * * * ?", runAllActions5Sec)
                         }
 
-                        pauseExecution(1000)
+                        pauseExecution(750)
                     }
                 } catch(e) {
                     Utils.toLogger("error", "poolCommand: resetting pool command exception = [${e}]")
@@ -1311,21 +1292,18 @@ def runAllActions()
             }
         }
 
-        if(commandQueue.size() < queueSize && queueSize != (commandQueue.size() + 1))
-        {
+        if(commandQueue.size() < queueSize && queueSize != (commandQueue.size() + 1)) {
             Utils.toLogger("error", "poolCommand queueSize is different - queueSize: ${queueSize} - commandSize: ${commandQueue.size()}")
         }        
         
-        if(commandQueue.size() > 0)
-        {
+        if(commandQueue.size() > 0) {
             Utils.toLogger("debug", "Setting queueSize: ${commandQueue.size()}")
         }
         
         queueSize = commandQueue.size()
 
         def duration = (pollIntervals.toInteger() ?: 60) * 1000
-        if (now() - lastLockQuery >= duration)
-        {
+        if (now() - lastLockQuery >= duration) {
             resetCloseSocketTimer()
             if (socketState != "closed" && commandQueue.size() == 0) {
 
@@ -1333,12 +1311,8 @@ def runAllActions()
                 closeSocket()
             }	
         }
-    }
-    else
-    {
-        Utils.toLogger("debug", "Lock Acquire failed ... Aborting!")
-        mutex.release()
-        exit
+    } else {
+        Utils.toLogger("error", "Lock Acquire failed ... Aborting!")
     }
     
     mutex.release()  
@@ -1364,8 +1338,7 @@ def openSocket() {
 		Utils.toLogger("debug", "openSocket: Socket opened.")
 		socketErrors = 0
 		return true
-	}
-	catch(e) {
+	} catch(e) {
 		Utils.toLogger("error", "openSocket: exception = ${e}")
         closeSocket()
 		return false
@@ -1450,20 +1423,18 @@ def makeRequest(type, data)
 }
 
 def getAPIKey() {
-    if (sinopehubid != /^[0-9A-Fa-f]{16}$/)
-    {
+    if (sinopehubid != /^[0-9A-Fa-f]{16}$/) {
         Utils.toLogger("error", "Neviweb Hub ID is invalid. 16 HEX characters, no spaces.")
     }
     
-    sendCommand(makeRequest("getAPIKey", byteArrayToHexString(key_request(invert(sinopehubid)))))
+    sendCommand(makeRequest(RESPONSE_TYPES.GET_API_KEY, byteArrayToHexString(key_request(invert(sinopehubid)))))
 }
 
 def sendRequest(dni, paramsMap) { //data
     synchronized(mutexSendCommand) {
         Utils.toLogger("debug", "sendRequest - login_request:${byteArrayToHexString(login_request())}")
-        loginRequestCommand = makeRequest("sendRequestResponse", byteArrayToHexString(login_request()))
-        if(!commandQueue.contains(loginRequestCommand))
-        {
+        loginRequestCommand = makeRequest(RESPONSE_TYPES.SEND_REQUEST, byteArrayToHexString(login_request()))
+        if(!commandQueue.contains(loginRequestCommand)) {
             sendCommand(loginRequestCommand)
             Utils.toLogger("debug", "Added login request command to queue")
         } else {
@@ -1472,9 +1443,8 @@ def sendRequest(dni, paramsMap) { //data
         
         sendCommand(paramsMap)
         
-        closeConnectionCommand = makeRequest("closeConnexion", "")
-        if(commandQueue.contains(closeConnectionCommand))
-        {
+        closeConnectionCommand = makeRequest(RESPONSE_TYPES.CLOSE_CONNECTION, "")
+        if(commandQueue.contains(closeConnectionCommand)) {
             commandQueue.remove(closeConnectionCommand)
             Utils.toLogger("debug", "Close connection removed, another one will be added at the end of the queue")
         }
@@ -1485,8 +1455,7 @@ def sendRequest(dni, paramsMap) { //data
 
 def login_request() {
     //Utils.toLogger("debug", "login_request")
-    if(state.APIKey == null)
-    {
+    if(state.APIKey == null) {
         Utils.toLogger("error", "APIkey is invalid! You need to acquire the APIkey by pressing 'Get APIkey' button")
     }
 
@@ -1534,23 +1503,19 @@ def retreive_key(data) {
     return key
 }
 
-def hexStringToByteArray(String s)
-{
+def hexStringToByteArray(String s) {
     return hubitat.helper.HexUtils.hexStringToByteArray(s)
 }
 
-def byteArrayToHexString(byte[] value)
-{
+def byteArrayToHexString(byte[] value) {
     return hubitat.helper.HexUtils.byteArrayToHexString(value)
 }
 
-def hexStringToIntArray(String s)
-{
+def hexStringToIntArray(String s) {
     return hubitat.helper.HexUtils.hexStringToIntArray(s)
 }
 
-def intArrayToHexString(byte[] value)
-{
+def intArrayToHexString(byte[] value) {
     return hubitat.helper.HexUtils.intArrayToHexString(value)
 }
 
@@ -1562,16 +1527,14 @@ def intToHex(value) {
     Integer.toHexString(value) 
 }
 
-def hexToFloatInt(hex)
-{
+def hexToFloatInt(hex) {
     //Utils.toLogger("debug", "hexToFloatInt ${hex}")
     Long i = Long.parseLong(hex, 16)
     //Utils.toLogger("debug", "hexToFloatInt i:${i}")
     return i.toInteger()
 }
 
-def crc8Update(bytes_)
-{
+def crc8Update(bytes_) {
     //debug("crc8Update - start")
     def sum = 0x00
     for (byte_ in bytes_) {
@@ -1583,8 +1546,7 @@ def crc8Update(bytes_)
     return sum
 }
 
-def crc8Digest(data)
-{
+def crc8Digest(data) {
     //debug("crc8Digest - data is ${byteArrayToHexString(data)}")
     def sum = crc8Update(data)
     //debug("crc8Digest - sum is ${sum}")
@@ -1670,7 +1632,7 @@ def data_read_request(String... arg) { // command,unit_id,data_app
     //Utils.toLogger("debug", "data_read_request read_crc is ${byteArrayToHexString(read_crc)}")
     //Utils.toLogger("debug", "data_read_request is ${byteArrayToHexString((hexStringToByteArray(data_frame).toList() + read_crc.toList()) as byte[])}")
     def data = byteArrayToHexString((hexStringToByteArray(data_frame).toList() + read_crc.toList()) as byte[])
-    def paramsMap = makeRequest("dataRead1Response", data)
+    def paramsMap = makeRequest(RESPONSE_TYPES.DATA_READ_1, data)
     return paramsMap
 }
 
@@ -1708,7 +1670,7 @@ def data_report_request(String... arg) { // data = size+time or size+temperature
     def read_crc = hexStringToByteArray(crc_count(hexStringToByteArray(data_frame)))
     //Utils.toLogger("debug", "data_report_request is ${byteArrayToHexString((hexStringToByteArray(data_frame).toList() + read_crc.toList()) as byte[])}")
     def data = byteArrayToHexString((hexStringToByteArray(data_frame).toList() + read_crc.toList()) as byte[])
-    def paramsMap = makeRequest("dataReport1Response", data)
+    def paramsMap = makeRequest(RESPONSE_TYPES.DATA_REPORT_1, data)
     return paramsMap
 }
 
@@ -1747,11 +1709,11 @@ def data_write_request(String... arg) { // data = size+data to send (command,uni
     //Utils.toLogger("debug", "data_write_request read_crc is ${byteArrayToHexString(read_crc)}")
     //Utils.toLogger("debug", "data_write_request is ${byteArrayToHexString((hexStringToByteArray(data_frame).toList() + read_crc.toList()) as byte[])}")
     def data = byteArrayToHexString((hexStringToByteArray(data_frame).toList() + read_crc.toList()) as byte[])
-    def paramsMap = makeRequest("dataWrite1Response", data)
+    def paramsMap = makeRequest(RESPONSE_TYPES.DATA_WRITE_1, data)
     return paramsMap
 }
 
-//This function helps control log_debug printing
+//This function helps control printing
 def childGetLogLevel() {
     Integer setLevelIdx = LOG_LEVELS.indexOf(logLevel);
     if (setLevelIdx < 0) {
