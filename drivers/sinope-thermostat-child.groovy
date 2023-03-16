@@ -20,6 +20,7 @@
  *  Version: 1.3 - Added better log system
  *  Version: 1.4 - Reformatted the supportedThermostatModes and supportedThermostatFanModes JSON_OBJECT attributes so that they work properly with Hubitat 2.3.3 and later
  *  Version: 1.5 - Major refactor to fix overloading hub error message
+ *  Version: 1.6 - Exposed Thermostat Operacional Mode in the preferences.
  */
 
 /*
@@ -94,10 +95,11 @@ import groovy.json.JsonOutput
 @Field final Map backlightOptions = [0:"Automatic", 100:"Always On"]
 @Field final Map earlyStartOptions = [0:"Disabled", 1:"Enabled"]
 @Field final Map keypadOptions = [0:"Unlocked", 1:"Locked"]
+@Field final Map thermostatOperationalModeOptions = [3:"Automatic", 2:"Manual", 0:"Off"] // values based on Map MODE
 @Field final Map temperatureSetPointsCelsius = [5.0:"5.0 C", 5.5:"5.5 C", 6.0:"6.0 C", 6.5:"6.5 C", 7.0:"7.0 C", 7.5:"7.5 C", 8.0:"8.0 C", 8.5:"8.5 C", 9:"9.0 C", 9.5:"9.5 C", 10.0:"10.0 C", 10.5:"10.5 C", 11.0:"11.0 C", 11.5:"11.5 C", 12.0:"12.0 C", 12.5:"12.5 C", 13.0:"13.0 C", 13.5:"13.5 C", 14.0:"14.0 C", 14.5:"14.5 C", 15.0:"15.0 C", 15.5:"15.5 C", 16.0:"16.0 C", 16.5:"16.5 C", 17.0:"17.0 C", 17.5:"17.5 C", 18.0:"18.0 C", 18.5:"18.5 C", 19.0:"19.0 C", 19.5:"19.5 C", 20.0:"20.0 C", 20.5:"20.5 C", 21.0:"21.0 C", 21.5:"21.5 C", 22.0:"22.0 C", 22.5:"22.5 C", 23.0:"23.0 C", 23.5:"23.5 C", 24.0:"24.0 C", 24.5:"24.5 C", 25.0:"25.0 C", 25.5:"25.5 C", 26.0:"26.0 C", 26.5:"26.5 C", 27.0:"27.0 C", 27.5:"27.5 C", 28.0:"28.0 C", 28.5:"28.5 C", 29.0:"29.0 C", 29.5:"29.5 C", 30.0:"30.0 C"]
 @Field final Map temperatureSetPointsFarenheit = [41.0:"41 F", 42.0:"42 F", 43.0:"43 F", 44.0:"44 F", 45.0:"45 F", 46.0:"46 F", 47.0:"47 F", 48.0:"48 F", 49.0:"49 F", 50.0:"50 F", 51.0:"51 F", 52.0:"52 F", 53.0:"53 F", 54.0:"54 F", 55.0:"55 F", 56.0:"56 F", 57.0:"57 F", 58.0:"58 F", 59.0:"59 F", 60.0:"60 F", 61.0:"61 F", 62.0:"62 F", 63.0:"63 F", 64.0:"64 F", 65.0:"65 F", 66.0:"66 F", 67.0:"67 F", 68.0:"68 F", 69.0:"69 F", 70.0:"70 F", 71.0:"71 F", 72.0:"72 F", 73.0:"73 F", 74.0:"74 F", 75.0:"75 F", 76.0:"76 F", 77.0:"77 F", 78.0:"78 F", 79.0:"79 F", 80.0:"80 F", 81.0:"81 F", 82.0:"82 F", 83.0:"83 F", 84.0:"84 F", 85.0:"85 F", 86.0:"86 F"]
 
-def driverVer() { return "1.5" }
+def driverVer() { return "1.6" }
 
 metadata {
 	definition (name: "Sinope Thermostat", namespace: "rferrazguimaraes", author: "Rangner Ferraz Guimaraes")
@@ -117,11 +119,16 @@ metadata {
         attribute "awayTemperature", "number"        
         attribute "load", "number"
         attribute "timeFormat", "string"
+        attribute "date", "string"
+        attribute "time", "string"
+        attribute "sunrise", "string"
+        attribute "sunset", "string"
         attribute "lock", "string"
         attribute "away", "string"
         attribute "secondaryDisplay", "string"
         attribute "temperatureFormatDisplay", "string"
         attribute "temperatureFormatHub", "string"
+        attribute "thermostatOperationalMode", "string"
         attribute "earlyStart", "string"
         attribute "backLightIdle", "number"
         
@@ -134,6 +141,7 @@ metadata {
     
     preferences {
         input name: "pollIntervals", type: "enum", title: "Set the Poll Interval.", options: pollIntervalOptions, defaultValue: "600", required: true 
+        input name: "prefThermostatOperationalMode", type: "enum", title: "Thermostat Operational Mode", options: thermostatOperationalModeOptions, defaultValue: "0", required: true
         input name: "prefDisplaySecondary", type: "enum", title: "Secondary Display", options: displaySecondaryOptions, defaultValue: "1", required: true
         input name: "prefDisplayTemperatureFormat", type: "enum", title: "Display Temperature Format", options: temperatureFormatOptions, defaultValue: "0", required: true
         input name: "prefDisplayTimeFormat", type: "enum", title: "Time Format", options: timeFormatOptions, defaultValue: "0", required: true
@@ -194,6 +202,7 @@ def parameterSetting() {
     parent.set_min_setpoint(device.deviceNetworkId, FormatTemperature(prefMinSetPoint ?: getMinTemperature(), "C"))
     parent.set_max_setpoint(device.deviceNetworkId, FormatTemperature(prefMaxSetPoint ?: getMaxTemperature(), "C"))
     parent.set_away_setpoint(device.deviceNetworkId, FormatTemperature(prefAwaySetPoint ?: getMinTemperature(), "C"))
+    set_hvac_mode(prefThermostatOperationalMode.toInteger())
 }
 
 def refresh() {
@@ -385,6 +394,11 @@ def formatResponse(response) {
     return "Type:${type} - Value: ${value}"
 }
 
+def formatMode(value) {
+    def type = capitalizeFully("${keyForValue(MODE, value)}".toLowerCase())
+    return type - "Sinope_Mode_"
+}
+
 def executeChildResponse(data) {
     def response = data.response
     Utils.toLogger("debug", "received executeChildResponse deviceID:${response.device} response: ${formatResponse(response)}")
@@ -405,9 +419,10 @@ def executeChildResponse(data) {
 			sendEvent(name: "thermostatOperatingState", value: (response.value > 10) ? "heating" : "idle")
             Utils.toLogger("debug", "received executeChildResponse heatLevel: ${response.value}")
             break
-        case [MESSAGE_TYPES.MODE]:
+        case [MESSAGE_TYPES.MODE]:        
             setThermostatMode((response.value > 0) ? "heat" : "off")
-            Utils.toLogger("debug", "received executeChildResponse mode: ${response.value}")
+            sendEvent(name: "thermostatOperationalMode", value: formatMode(response.value))
+            Utils.toLogger("debug", "received executeChildResponse thermostatOperationalMode: ${formatMode(response.value)}")
             break
         case [MESSAGE_TYPES.AWAY]:
             sendEvent(name: "away", value: response.value)
@@ -607,24 +622,6 @@ def manageCycle(){
 		else if (heatingOn && thermostatOperatingState != "heating") setThermostatOperatingState("heating")
 		else if ((!coolingOn || !heatingOn) && thermostatOperatingState != "idle") setThermostatOperatingState("idle")
 	}
-    
-    updateThermostateMode(thermostatMode)
-}
-
-private updateThermostateMode(thermostatMode)
-{
-    return
-    switch(thermostatMode) {
-        case "heat":
-        set_hvac_mode(MODE.SINOPE_MODE_MANUAL)
-        break
-        case "auto":
-        set_hvac_mode(MODE.SINOPE_MODE_AUTO)
-        break
-        case "off":
-        set_hvac_mode(MODE.SINOPE_MODE_OFF)
-        break
-    }
 }
 
 def set_outside_temperature(self, outside_temperature) {
@@ -648,7 +645,7 @@ def set_hvac_mode(hvac_mode) {
 
     //Set new hvac mode.
     parent.send_time(device.deviceNetworkId)
-    def type = 10 //temp to cleanup
+    def type = 10 //temp to cleanup  - based on IMPLEMENTED_DEVICE_TYPES
     parent.set_mode(device.deviceNetworkId, type, hvac_mode)
 }
 
@@ -658,14 +655,14 @@ def set_preset_mode(self, preset_mode) {
         return
     }
     
-    self._type = 10 //temp to cleanup
+    def type = 10 //temp to cleanup - based on IMPLEMENTED_DEVICE_TYPES
     if (preset_mode == PRESET_AWAY) {
         //Set away mode on device, away_on = 2 away_off =0
         parent.set_away_mode(device.deviceNetworkId, 2)
     } else if (preset_mode == PRESET_BYPASS) {
         if (SINOPE_BYPASSABLE_MODES.contains(self._operation_mode)) {
             parent.set_away_mode(device.deviceNetworkId, 0)      
-            parent.set_mode(device.deviceNetworkId, self._type, self._operation_mode | SINOPE_BYPASS_FLAG)
+            parent.set_mode(device.deviceNetworkId, type, self._operation_mode | SINOPE_BYPASS_FLAG)
         } else if (preset_mode == PRESET_NONE) {
             // Re-apply current hvac_mode without any preset
             parent.set_away_mode(device.deviceNetworkId, 0)
