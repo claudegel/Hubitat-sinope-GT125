@@ -23,6 +23,7 @@ You will need to add two drivers (parent and child) in the hubitat driver page. 
 2) Press the "Get APIKey" button and press the "Web" button on the GT125 hub. You will need to do this just once and the API key will be saved in the parent driver. 
 3) The next step is to add your thermostats. You can check the logs the step-by-step (make sure the log level is at least set as "info"). Do this by pressing the "Add Thermostat" button and pressing the two buttons on the thermostat itself at the same time. That will create the child thermostat and you can set the name you want for it in its settings. Keep doing this process until you add all the thermostats. I left the configuration for the default pool interval at 10 minutes. I have seven thermostats and this is the setting that worked best for me. When I tried shorter times, my network would be overflowed with messages.
 4) Change the name of the new thermostat device that was created. It should be under the "Sinope Neviweb Hub" device you created in the first step. Keep doing the third and forth steps to add all your thermostats.
+5) If you see any erros in the log, press the button "Initialize" in the device's page that has the error.
 
 # Note
 I did this on my free time (this is my first driver) and for sure there are bugs so use it on your own risk. Some of the features done by claudegel are not yet supported, such as setting the outdoor temperature. For now this settings is coming directly from sinope.
