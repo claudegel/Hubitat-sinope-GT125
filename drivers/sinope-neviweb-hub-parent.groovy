@@ -20,6 +20,7 @@
  *  Version: 1.3 - Fixed how the parameters are set (firmware update broke it)
  *  Version: 1.4 - Decreased the amount of overload messages (login and close connection messages), changed log system
  *  Version: 1.5 - Major refactor to fix overloading hub error message
+ *  Version: 1.6 - Fixed new installation
  */
 
 import groovy.transform.Field
@@ -32,7 +33,7 @@ import hubitat.device.Protocol
 
 @Field Utils = Utils_create();
 @Field List<String> LOG_LEVELS = ["error", "warn", "info", "debug", "trace"]
-@Field String DEFAULT_LOG_LEVEL = LOG_LEVELS[1]
+@Field String DEFAULT_LOG_LEVEL = LOG_LEVELS[2]
 
 @Field final Map MESSAGE_TYPES = [
     TEMPERATURE:         0,
@@ -176,7 +177,7 @@ import hubitat.device.Protocol
 @Field static int queueSize = 0
 @Field static int socketErrors = 0
 
-def driverVer() { return "1.5" }
+def driverVer() { return "1.6" }
 
 metadata {
     definition(name: "Sinope Neviweb Hub", namespace: "rferrazguimaraes", author: "Rangner Ferraz Guimaraes") {
@@ -192,7 +193,7 @@ metadata {
         input("sinopehubip", "string", title: "Neviweb Hub IP Address", description: "e.g. 192.168.1.X", required: true)
         input("sinopehubport", "string", title: "Neviweb Hub IP Port", description: "Default 4550", required: true, defaultValue: 4550)
         input("sinopehubid", "string", title: "Neviweb Hub ID (no spaces)", required: true)
-        input name: "pollIntervals", type: "enum", title: "Set the Poll Interval.", options: [0:"off", 60:"1 minute", 120:"2 minutes", 300:"5 minutes"], required: true, defaultValue: "600"
+        input name: "pollIntervals", type: "enum", title: "Set the Poll Interval.", options: [0:"off", 60:"1 minute", 120:"2 minutes", 300:"5 minutes"], required: true, defaultValue: "300"
         input name: "logLevel", title: "Log Level", type: "enum", options: LOG_LEVELS, defaultValue: DEFAULT_LOG_LEVEL, required: true
     }
 }
@@ -243,8 +244,8 @@ def addThermostat() {
     synchronized(mutexSendCommand) {
         Utils.toLogger("debug", "Adding Thermostat")
         resetCloseSocketTimer()
-        sendCommand(makeRequest("sendRequestResponse", byteArrayToHexString(login_request())))
-        sendCommand(makeRequest("addThermostat", ""))
+        sendCommand(makeRequest(RESPONSE_TYPES.SEND_REQUEST, byteArrayToHexString(login_request())))
+        sendCommand(makeRequest(RESPONSE_TYPES.ADD_THERMOSTAT, ""))
     }
 }
 
@@ -824,13 +825,11 @@ def parse(response) {
     Utils.toLogger("debug", "parse Response is ${response} and size is ${hexStringToByteArray(response).size()}")
     
     def respLength = response.length()
-    if(respLength == null || respLength == 0)
-    {
+    if(respLength == null || respLength == 0) {
         return
     }
     
-    if (respLength == 1024)
-    {
+    if (respLength == 1024) {
         // Length is max so concatenate together
         def concatStr = getDataValue("fullMessage")
         if (concatStr == null) {
@@ -839,9 +838,7 @@ def parse(response) {
             concatStr = concatStr + response
         }
         device.updateDataValue("fullMessage", concatStr)
-    }
-    else
-    {
+    } else {
 		// Length less than max so concatenate with previous if required, and then process
 		def concatStr = getDataValue("fullMessage")
         if (concatStr == null) {
@@ -1074,9 +1071,7 @@ def updateChild(updateType, response) {
             } catch (e) {
                 Utils.toLogger("error", "Couldnt process response, probably this child doesnt exist: ${e} in all_unit")
             }
-        }
-        else
-        {
+        } else {
             try {
                 def resultDevice = getChildDevices().find {
                     it.deviceNetworkId == deviceID
@@ -1260,6 +1255,7 @@ def runAllActions()
                     def paramsMap = commandQueue.poll()
 
                     if(paramsMap != null) {
+                        Utils.toLogger("debug", "runAllActions setting responseType to: ${paramsMap.type}")
                         device.updateDataValue("responseType", "${paramsMap.type}")
 
                         switch(paramsMap.type) {
